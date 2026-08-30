@@ -1,0 +1,296 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: tasks.mesh.itai.dev
+spec:
+  group: mesh.itai.dev
+  names:
+    kind: Task
+    listKind: TaskList
+    plural: tasks
+    singular: task
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.agentRef
+      name: Agent
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Task is the Schema for the tasks API — one unit of A2A work dispatched
+          from the mesh to a target Agent, with status kept in sync by polling
+          (or, once wired up, subscribing to) the agent's task stream.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: TaskSpec defines the work to dispatch and where to dispatch
+              it.
+            properties:
+              agentRef:
+                description: |-
+                  AgentRef names the Agent resource (in this namespace) that should
+                  receive the task. TaskReconciler resolves this to status.endpoint.
+                type: string
+              contextID:
+                description: |-
+                  ContextID lets multiple Task resources share one A2A conversation
+                  context, mirroring the spec's contextId field for multi-turn tasks.
+                type: string
+              message:
+                description: Message is the initial user message sent via A2A SendMessage.
+                properties:
+                  parts:
+                    items:
+                      description: |-
+                        Part is a discriminated union matching A2A's Part type (TextPart /
+                        DataPart / FilePart collapsed into one struct with a kind discriminator,
+                        since CRDs don't support proto oneof directly).
+                      properties:
+                        data:
+                          description: Data holds arbitrary structured JSON for kind=data.
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                        fileURI:
+                          description: |-
+                            FileURI is used for kind=file (agent-mesh resolves it against an
+                            in-cluster artifact store rather than embedding bytes in the CRD).
+                          type: string
+                        kind:
+                          enum:
+                          - text
+                          - data
+                          - file
+                          type: string
+                        mimeType:
+                          type: string
+                        text:
+                          type: string
+                      required:
+                      - kind
+                      type: object
+                    type: array
+                  role:
+                    enum:
+                    - user
+                    - agent
+                    type: string
+                required:
+                - parts
+                - role
+                type: object
+              skillID:
+                description: |-
+                  SkillID optionally pins the task to one of the target Agent's
+                  declared skills; left empty, the agent chooses how to route it.
+                type: string
+            required:
+            - agentRef
+            - message
+            type: object
+          status:
+            description: TaskStatus reflects what the remote agent has reported back.
+            properties:
+              artifacts:
+                items:
+                  description: |-
+                    Artifact mirrors A2A's Artifact object — a named bundle of output Parts
+                    produced by the agent while working a task.
+                  properties:
+                    name:
+                      type: string
+                    parts:
+                      items:
+                        description: |-
+                          Part is a discriminated union matching A2A's Part type (TextPart /
+                          DataPart / FilePart collapsed into one struct with a kind discriminator,
+                          since CRDs don't support proto oneof directly).
+                        properties:
+                          data:
+                            description: Data holds arbitrary structured JSON for
+                              kind=data.
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          fileURI:
+                            description: |-
+                              FileURI is used for kind=file (agent-mesh resolves it against an
+                              in-cluster artifact store rather than embedding bytes in the CRD).
+                            type: string
+                          kind:
+                            enum:
+                            - text
+                            - data
+                            - file
+                            type: string
+                          mimeType:
+                            type: string
+                          text:
+                            type: string
+                        required:
+                        - kind
+                        type: object
+                      type: array
+                  type: object
+                type: array
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              lastTransitionTime:
+                description: LastTransitionTime is when State last changed, for backoff/timeout
+                  logic.
+                format: date-time
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              state:
+                description: |-
+                  TaskState mirrors the A2A protocol's TaskState enum (spec section on Task
+                  lifecycle): submitted -> working -> {input-required <-> working} ->
+                  {completed | failed | canceled | rejected}. auth-required covers agents
+                  that need an out-of-band credential mid-task.
+                enum:
+                - submitted
+                - working
+                - input-required
+                - auth-required
+                - completed
+                - canceled
+                - failed
+                - rejected
+                - unknown
+                type: string
+              statusMessage:
+                description: |-
+                  StatusMessage carries the agent's latest status Message, e.g. an
+                  input-required prompt or a failure reason.
+                properties:
+                  parts:
+                    items:
+                      description: |-
+                        Part is a discriminated union matching A2A's Part type (TextPart /
+                        DataPart / FilePart collapsed into one struct with a kind discriminator,
+                        since CRDs don't support proto oneof directly).
+                      properties:
+                        data:
+                          description: Data holds arbitrary structured JSON for kind=data.
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                        fileURI:
+                          description: |-
+                            FileURI is used for kind=file (agent-mesh resolves it against an
+                            in-cluster artifact store rather than embedding bytes in the CRD).
+                          type: string
+                        kind:
+                          enum:
+                          - text
+                          - data
+                          - file
+                          type: string
+                        mimeType:
+                          type: string
+                        text:
+                          type: string
+                      required:
+                      - kind
+                      type: object
+                    type: array
+                  role:
+                    enum:
+                    - user
+                    - agent
+                    type: string
+                required:
+                - parts
+                - role
+                type: object
+              taskID:
+                description: |-
+                  TaskID is the identifier the remote agent assigned on SendMessage;
+                  used for all subsequent GetTask/CancelTask/SubscribeToTask calls.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

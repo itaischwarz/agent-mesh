@@ -1,0 +1,12 @@
+apiVersion: mesh.itai.dev/v1alpha1
+kind: Task
+metadata:
+  name: screen-jdoe-backend-role
+spec:
+  agentRef: candidate-screener
+  skillID: screen_candidate
+  message:
+    role: user
+    parts:
+      - kind: text
+        text: "Screen John Doe's resume against the senior backend role requirements."

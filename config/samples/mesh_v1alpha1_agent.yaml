@@ -1,0 +1,24 @@
+apiVersion: mesh.itai.dev/v1alpha1
+kind: Agent
+metadata:
+  name: candidate-screener
+spec:
+  name: candidate-screener
+  description: Screens job candidates against role requirements
+  image: ghcr.io/itaic/candidate-screener-agent:latest
+  port: 50051
+  replicas: 2
+  skills:
+    - id: screen_candidate
+      name: Screen Candidate
+      description: Scores a candidate resume against requirements
+      tags: ["hr", "screening"]
+      examples:
+        - "Screen this resume against the senior backend role"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
