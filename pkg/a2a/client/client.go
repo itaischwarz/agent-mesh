@@ -70,6 +70,7 @@ func (c *Client) GetTask(ctx context.Context, id string) (*a2apb.Task, error) {
 	return c.rpc.GetTask(ctx, &a2apb.GetTaskRequest{Id: id})
 }
 
+
 // CancelTask requests cooperative cancellation, used when a Task CR is deleted
 // mid-flight (see TaskReconciler's finalizer).
 func (c *Client) CancelTask(ctx context.Context, id string) (*a2apb.Task, error) {

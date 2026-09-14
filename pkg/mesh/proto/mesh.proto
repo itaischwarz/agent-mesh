@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package mesh.v1;
+
+option go_package = "github.com/itaic/agent-mesh/pkg/mesh/pb;meshpb";
+
+import "a2a.proto";
+
+// MeshService is what a running agent calls to reach the rest of the mesh —
+// the inverse of A2AService (which the mesh calls to reach an agent). Scoped
+// for now to two explicitly-named agents; CreateSubTaskRequest.target_agent_ref
+// is a direct name, not a skill query. Selection/discovery across many
+// candidate agents is the next growth point for this file.
+service MeshService {
+  // CreateSubTask dispatches work to a named agent by creating a Task CR on
+  // the caller's behalf. Fire-and-forget: it returns the created Task's
+  // name, not its remote state — TaskReconciler still owns dispatch/polling.
+  rpc CreateSubTask(CreateSubTaskRequest) returns (CreateSubTaskResponse);
+
+  // GetAgentInfo reports a named agent's declared skills and readiness, so
+  // a caller can decide what to ask it for before dispatching. Stands in
+  // for real discovery until multi-agent selection exists.
+  rpc GetAgentInfo(GetAgentInfoRequest) returns (GetAgentInfoResponse);
+}
+
+message CreateSubTaskRequest {
+  string caller_agent_ref = 1; // name of the Agent CR making the request
+  string target_agent_ref = 2; // name of the Agent CR to dispatch to
+  string namespace = 3;        // namespace both Agents and the new Task live in
+  a2a.v1.Message message = 4;
+  string skill_id = 5;
+  string context_id = 6;
+}
+
+message CreateSubTaskResponse {
+  string task_id = 1; // name of the created Task CR
+}
+
+message GetAgentInfoRequest {
+  string agent_ref = 1;
+  string namespace = 2;
+}
+
+message GetAgentInfoResponse {
+  string name = 1;
+  bool ready = 2;
+  repeated string skill_ids = 3;
+  string description = 4;
+}

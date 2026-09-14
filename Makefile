@@ -11,6 +11,14 @@ proto:
 		--go-grpc_out=pkg/a2a/pb --go-grpc_opt=paths=source_relative \
 		-I pkg/a2a/proto pkg/a2a/proto/a2a.proto
 
+
+proto-mesh:
+	mkdir -p pkg/mesh/pb
+	protoc \
+		--go_out=pkg/mesh/pb --go_opt=paths=source_relative \
+		--go-grpc_out=pkg/mesh/pb --go-grpc_opt=paths=source_relative \
+		-I pkg/mesh/proto -I pkg/a2a/proto pkg/mesh/proto/mesh.proto
+
 # Regenerates zz_generated.deepcopy.go from the +kubebuilder:object markers.
 # Requires: controller-gen (go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest)
 generate:
