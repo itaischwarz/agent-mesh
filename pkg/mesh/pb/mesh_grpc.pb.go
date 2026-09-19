@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	MeshService_CreateSubTask_FullMethodName = "/mesh.v1.MeshService/CreateSubTask"
 	MeshService_GetAgentInfo_FullMethodName  = "/mesh.v1.MeshService/GetAgentInfo"
+	MeshService_WatchSubTask_FullMethodName  = "/mesh.v1.MeshService/WatchSubTask"
 )
 
 // MeshServiceClient is the client API for MeshService service.
@@ -41,6 +42,14 @@ type MeshServiceClient interface {
 	// a caller can decide what to ask it for before dispatching. Stands in
 	// for real discovery until multi-agent selection exists.
 	GetAgentInfo(ctx context.Context, in *GetAgentInfoRequest, opts ...grpc.CallOption) (*GetAgentInfoResponse, error)
+	// WatchSubTask streams a subtask's status/thought/artifact updates until
+	// it reaches a terminal state, so the caller isn't stuck polling. Mirrors
+	// a2a.v1's SubscribeToTask one layer up: TaskReconciler already pulls the
+	// target agent's own updates onto the Task CR (task_controller.go) by
+	// dialing agent 2's standard A2A endpoints — agent 2 never needs to know
+	// the mesh exists. WatchSubTask just re-streams that CR's changes back
+	// out to the original caller (agent 1).
+	WatchSubTask(ctx context.Context, in *WatchSubTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubTaskUpdate], error)
 }
 
 type meshServiceClient struct {
@@ -71,6 +80,25 @@ func (c *meshServiceClient) GetAgentInfo(ctx context.Context, in *GetAgentInfoRe
 	return out, nil
 }
 
+func (c *meshServiceClient) WatchSubTask(ctx context.Context, in *WatchSubTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubTaskUpdate], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &MeshService_ServiceDesc.Streams[0], MeshService_WatchSubTask_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchSubTaskRequest, SubTaskUpdate]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type MeshService_WatchSubTaskClient = grpc.ServerStreamingClient[SubTaskUpdate]
+
 // MeshServiceServer is the server API for MeshService service.
 // All implementations must embed UnimplementedMeshServiceServer
 // for forward compatibility.
@@ -89,6 +117,14 @@ type MeshServiceServer interface {
 	// a caller can decide what to ask it for before dispatching. Stands in
 	// for real discovery until multi-agent selection exists.
 	GetAgentInfo(context.Context, *GetAgentInfoRequest) (*GetAgentInfoResponse, error)
+	// WatchSubTask streams a subtask's status/thought/artifact updates until
+	// it reaches a terminal state, so the caller isn't stuck polling. Mirrors
+	// a2a.v1's SubscribeToTask one layer up: TaskReconciler already pulls the
+	// target agent's own updates onto the Task CR (task_controller.go) by
+	// dialing agent 2's standard A2A endpoints — agent 2 never needs to know
+	// the mesh exists. WatchSubTask just re-streams that CR's changes back
+	// out to the original caller (agent 1).
+	WatchSubTask(*WatchSubTaskRequest, grpc.ServerStreamingServer[SubTaskUpdate]) error
 	mustEmbedUnimplementedMeshServiceServer()
 }
 
@@ -104,6 +140,9 @@ func (UnimplementedMeshServiceServer) CreateSubTask(context.Context, *CreateSubT
 }
 func (UnimplementedMeshServiceServer) GetAgentInfo(context.Context, *GetAgentInfoRequest) (*GetAgentInfoResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAgentInfo not implemented")
+}
+func (UnimplementedMeshServiceServer) WatchSubTask(*WatchSubTaskRequest, grpc.ServerStreamingServer[SubTaskUpdate]) error {
+	return status.Error(codes.Unimplemented, "method WatchSubTask not implemented")
 }
 func (UnimplementedMeshServiceServer) mustEmbedUnimplementedMeshServiceServer() {}
 func (UnimplementedMeshServiceServer) testEmbeddedByValue()                     {}
@@ -162,6 +201,17 @@ func _MeshService_GetAgentInfo_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MeshService_WatchSubTask_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchSubTaskRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(MeshServiceServer).WatchSubTask(m, &grpc.GenericServerStream[WatchSubTaskRequest, SubTaskUpdate]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type MeshService_WatchSubTaskServer = grpc.ServerStreamingServer[SubTaskUpdate]
+
 // MeshService_ServiceDesc is the grpc.ServiceDesc for MeshService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -178,6 +228,12 @@ var MeshService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _MeshService_GetAgentInfo_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "WatchSubTask",
+			Handler:       _MeshService_WatchSubTask_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "mesh.proto",
 }

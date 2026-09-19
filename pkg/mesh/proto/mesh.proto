@@ -5,6 +5,7 @@ package mesh.v1;
 option go_package = "github.com/itaic/agent-mesh/pkg/mesh/pb;meshpb";
 
 import "a2a.proto";
+import "google/protobuf/timestamp.proto";
 
 // MeshService is what a running agent calls to reach the rest of the mesh —
 // the inverse of A2AService (which the mesh calls to reach an agent). Scoped
@@ -21,6 +22,15 @@ service MeshService {
   // a caller can decide what to ask it for before dispatching. Stands in
   // for real discovery until multi-agent selection exists.
   rpc GetAgentInfo(GetAgentInfoRequest) returns (GetAgentInfoResponse);
+
+  // WatchSubTask streams a subtask's status/thought/artifact updates until
+  // it reaches a terminal state, so the caller isn't stuck polling. Mirrors
+  // a2a.v1's SubscribeToTask one layer up: TaskReconciler already pulls the
+  // target agent's own updates onto the Task CR (task_controller.go) by
+  // dialing agent 2's standard A2A endpoints — agent 2 never needs to know
+  // the mesh exists. WatchSubTask just re-streams that CR's changes back
+  // out to the original caller (agent 1).
+  rpc WatchSubTask(WatchSubTaskRequest) returns (stream SubTaskUpdate);
 }
 
 message CreateSubTaskRequest {
@@ -46,4 +56,37 @@ message GetAgentInfoResponse {
   bool ready = 2;
   repeated string skill_ids = 3;
   string description = 4;
+}
+
+message WatchSubTaskRequest {
+  string task_id = 1;   // Task CR name, as returned by CreateSubTaskResponse
+  string namespace = 2;
+}
+
+// SubTaskStatus carries a lifecycle transition (submitted/working/completed/
+// etc.) — the "what stage is this at" signal, not the play-by-play.
+message SubTaskStatus {
+  a2a.v1.TaskState state = 1;
+}
+
+// ThoughtEvent carries the agent's own narration of what it's doing right
+// now — derived from the target agent's status_message while it's still
+// working, as opposed to artifacts (the actual deliverable content). agent_id
+// /task_id/seq are synthesized by the mesh (from the Task CR and an
+// in-process counter), not sent by the target agent itself.
+message ThoughtEvent {
+  string agent_id = 1;
+  string task_id = 2;
+  uint64 seq = 3;
+  google.protobuf.Timestamp ts = 4;
+  string content = 5;
+}
+
+message SubTaskUpdate {
+  oneof event {
+    SubTaskStatus status_update = 1;
+    ThoughtEvent thought_event = 2;
+    a2a.v1.Artifact artifact_update = 3;
+  }
+  bool final = 4; // true once the subtask has reached a terminal state
 }

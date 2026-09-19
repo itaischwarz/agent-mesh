@@ -24,6 +24,19 @@ const (
 	TaskStateUnknown       TaskState = "unknown"
 )
 
+// IsTerminal reports whether a Task in this state will change on its own —
+// false means TaskReconciler (or a WatchSubTask caller) should keep
+// expecting further updates. Lives on the type itself since both
+// internal/controller and internal/meshserver need the same answer.
+func (s TaskState) IsTerminal() bool {
+	switch s {
+	case TaskStateCompleted, TaskStateFailed, TaskStateCanceled, TaskStateRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Part is a discriminated union matching A2A's Part type (TextPart /
 // DataPart / FilePart collapsed into one struct with a kind discriminator,
 // since CRDs don't support proto oneof directly).

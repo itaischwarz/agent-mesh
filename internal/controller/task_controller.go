@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	meshv1alpha1 "github.com/itaic/agent-mesh/api/v1alpha1"
+	"github.com/itaic/agent-mesh/internal/a2aconv"
 	a2aclient "github.com/itaic/agent-mesh/pkg/a2a/client"
 	a2apb "github.com/itaic/agent-mesh/pkg/a2a/pb"
 )
@@ -88,7 +89,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// First reconcile after creation: no TaskID yet, so dispatch.
 	if task.Status.TaskID == "" {
 		remoteTask, err := conn.SendMessage(ctx, &a2apb.SendMessageRequest{
-			Message:   toProtoMessage(task.Spec.Message),
+			Message:   a2aconv.ToProtoMessage(task.Spec.Message),
 			ContextId: task.Spec.ContextID,
 			SkillId:   task.Spec.SkillID,
 		})
@@ -113,7 +114,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	// Already dispatched and terminal: nothing left to do.
-	if isTerminal(task.Status.State) {
+	if task.Status.State.IsTerminal() {
 		return ctrl.Result{}, nil
 	}
 
@@ -156,7 +157,7 @@ func (r *TaskReconciler) consumeStream(
 				if err := r.Status().Update(ctx, task); err != nil {
 					return ctrl.Result{}, err
 				}
-				if isTerminal(task.Status.State) {
+				if task.Status.State.IsTerminal() {
 					return ctrl.Result{}, nil
 				}
 				return ctrl.Result{RequeueAfter: requeuePolling}, nil
@@ -178,7 +179,7 @@ func (r *TaskReconciler) consumeStream(
 			if err := r.Status().Update(ctx, task); err != nil {
 				return ctrl.Result{}, err
 			}
-			if update.GetFinal() || isTerminal(task.Status.State) {
+			if update.GetFinal() || task.Status.State.IsTerminal() {
 				return ctrl.Result{}, nil
 			}
 		}
@@ -246,15 +247,6 @@ func (r *TaskReconciler) streamAgent(
 	return out, errc
 }
 
-func isTerminal(s meshv1alpha1.TaskState) bool {
-	switch s {
-	case meshv1alpha1.TaskStateCompleted, meshv1alpha1.TaskStateFailed,
-		meshv1alpha1.TaskStateCanceled, meshv1alpha1.TaskStateRejected:
-		return true
-	default:
-		return false
-	}
-}
 
 func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).

@@ -10,6 +10,7 @@ import (
 	pb "github.com/itaic/agent-mesh/pkg/a2a/pb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -270,12 +271,297 @@ func (x *GetAgentInfoResponse) GetDescription() string {
 	return ""
 }
 
+type WatchSubTaskRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"` // Task CR name, as returned by CreateSubTaskResponse
+	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WatchSubTaskRequest) Reset() {
+	*x = WatchSubTaskRequest{}
+	mi := &file_mesh_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WatchSubTaskRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WatchSubTaskRequest) ProtoMessage() {}
+
+func (x *WatchSubTaskRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_mesh_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WatchSubTaskRequest.ProtoReflect.Descriptor instead.
+func (*WatchSubTaskRequest) Descriptor() ([]byte, []int) {
+	return file_mesh_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *WatchSubTaskRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *WatchSubTaskRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+// SubTaskStatus carries a lifecycle transition (submitted/working/completed/
+// etc.) — the "what stage is this at" signal, not the play-by-play.
+type SubTaskStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	State         pb.TaskState           `protobuf:"varint,1,opt,name=state,proto3,enum=a2a.v1.TaskState" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubTaskStatus) Reset() {
+	*x = SubTaskStatus{}
+	mi := &file_mesh_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubTaskStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubTaskStatus) ProtoMessage() {}
+
+func (x *SubTaskStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_mesh_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubTaskStatus.ProtoReflect.Descriptor instead.
+func (*SubTaskStatus) Descriptor() ([]byte, []int) {
+	return file_mesh_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SubTaskStatus) GetState() pb.TaskState {
+	if x != nil {
+		return x.State
+	}
+	return pb.TaskState(0)
+}
+
+// ThoughtEvent carries the agent's own narration of what it's doing right
+// now — derived from the target agent's status_message while it's still
+// working, as opposed to artifacts (the actual deliverable content). agent_id
+// /task_id/seq are synthesized by the mesh (from the Task CR and an
+// in-process counter), not sent by the target agent itself.
+type ThoughtEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Seq           uint64                 `protobuf:"varint,3,opt,name=seq,proto3" json:"seq,omitempty"`
+	Ts            *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=ts,proto3" json:"ts,omitempty"`
+	Content       string                 `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ThoughtEvent) Reset() {
+	*x = ThoughtEvent{}
+	mi := &file_mesh_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ThoughtEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ThoughtEvent) ProtoMessage() {}
+
+func (x *ThoughtEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_mesh_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ThoughtEvent.ProtoReflect.Descriptor instead.
+func (*ThoughtEvent) Descriptor() ([]byte, []int) {
+	return file_mesh_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ThoughtEvent) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *ThoughtEvent) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ThoughtEvent) GetSeq() uint64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *ThoughtEvent) GetTs() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Ts
+	}
+	return nil
+}
+
+func (x *ThoughtEvent) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+type SubTaskUpdate struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Event:
+	//
+	//	*SubTaskUpdate_StatusUpdate
+	//	*SubTaskUpdate_ThoughtEvent
+	//	*SubTaskUpdate_ArtifactUpdate
+	Event         isSubTaskUpdate_Event `protobuf_oneof:"event"`
+	Final         bool                  `protobuf:"varint,4,opt,name=final,proto3" json:"final,omitempty"` // true once the subtask has reached a terminal state
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubTaskUpdate) Reset() {
+	*x = SubTaskUpdate{}
+	mi := &file_mesh_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubTaskUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubTaskUpdate) ProtoMessage() {}
+
+func (x *SubTaskUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_mesh_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubTaskUpdate.ProtoReflect.Descriptor instead.
+func (*SubTaskUpdate) Descriptor() ([]byte, []int) {
+	return file_mesh_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SubTaskUpdate) GetEvent() isSubTaskUpdate_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *SubTaskUpdate) GetStatusUpdate() *SubTaskStatus {
+	if x != nil {
+		if x, ok := x.Event.(*SubTaskUpdate_StatusUpdate); ok {
+			return x.StatusUpdate
+		}
+	}
+	return nil
+}
+
+func (x *SubTaskUpdate) GetThoughtEvent() *ThoughtEvent {
+	if x != nil {
+		if x, ok := x.Event.(*SubTaskUpdate_ThoughtEvent); ok {
+			return x.ThoughtEvent
+		}
+	}
+	return nil
+}
+
+func (x *SubTaskUpdate) GetArtifactUpdate() *pb.Artifact {
+	if x != nil {
+		if x, ok := x.Event.(*SubTaskUpdate_ArtifactUpdate); ok {
+			return x.ArtifactUpdate
+		}
+	}
+	return nil
+}
+
+func (x *SubTaskUpdate) GetFinal() bool {
+	if x != nil {
+		return x.Final
+	}
+	return false
+}
+
+type isSubTaskUpdate_Event interface {
+	isSubTaskUpdate_Event()
+}
+
+type SubTaskUpdate_StatusUpdate struct {
+	StatusUpdate *SubTaskStatus `protobuf:"bytes,1,opt,name=status_update,json=statusUpdate,proto3,oneof"`
+}
+
+type SubTaskUpdate_ThoughtEvent struct {
+	ThoughtEvent *ThoughtEvent `protobuf:"bytes,2,opt,name=thought_event,json=thoughtEvent,proto3,oneof"`
+}
+
+type SubTaskUpdate_ArtifactUpdate struct {
+	ArtifactUpdate *pb.Artifact `protobuf:"bytes,3,opt,name=artifact_update,json=artifactUpdate,proto3,oneof"`
+}
+
+func (*SubTaskUpdate_StatusUpdate) isSubTaskUpdate_Event() {}
+
+func (*SubTaskUpdate_ThoughtEvent) isSubTaskUpdate_Event() {}
+
+func (*SubTaskUpdate_ArtifactUpdate) isSubTaskUpdate_Event() {}
+
 var File_mesh_proto protoreflect.FileDescriptor
 
 const file_mesh_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"mesh.proto\x12\amesh.v1\x1a\ta2a.proto\"\xed\x01\n" +
+	"mesh.proto\x12\amesh.v1\x1a\ta2a.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xed\x01\n" +
 	"\x14CreateSubTaskRequest\x12(\n" +
 	"\x10caller_agent_ref\x18\x01 \x01(\tR\x0ecallerAgentRef\x12(\n" +
 	"\x10target_agent_ref\x18\x02 \x01(\tR\x0etargetAgentRef\x12\x1c\n" +
@@ -293,10 +579,28 @@ const file_mesh_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05ready\x18\x02 \x01(\bR\x05ready\x12\x1b\n" +
 	"\tskill_ids\x18\x03 \x03(\tR\bskillIds\x12 \n" +
-	"\vdescription\x18\x04 \x01(\tR\vdescription2\xaa\x01\n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\"L\n" +
+	"\x13WatchSubTaskRequest\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1c\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"8\n" +
+	"\rSubTaskStatus\x12'\n" +
+	"\x05state\x18\x01 \x01(\x0e2\x11.a2a.v1.TaskStateR\x05state\"\x9a\x01\n" +
+	"\fThoughtEvent\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x10\n" +
+	"\x03seq\x18\x03 \x01(\x04R\x03seq\x12*\n" +
+	"\x02ts\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\x12\x18\n" +
+	"\acontent\x18\x05 \x01(\tR\acontent\"\xe8\x01\n" +
+	"\rSubTaskUpdate\x12=\n" +
+	"\rstatus_update\x18\x01 \x01(\v2\x16.mesh.v1.SubTaskStatusH\x00R\fstatusUpdate\x12<\n" +
+	"\rthought_event\x18\x02 \x01(\v2\x15.mesh.v1.ThoughtEventH\x00R\fthoughtEvent\x12;\n" +
+	"\x0fartifact_update\x18\x03 \x01(\v2\x10.a2a.v1.ArtifactH\x00R\x0eartifactUpdate\x12\x14\n" +
+	"\x05final\x18\x04 \x01(\bR\x05finalB\a\n" +
+	"\x05event2\xf2\x01\n" +
 	"\vMeshService\x12N\n" +
 	"\rCreateSubTask\x12\x1d.mesh.v1.CreateSubTaskRequest\x1a\x1e.mesh.v1.CreateSubTaskResponse\x12K\n" +
-	"\fGetAgentInfo\x12\x1c.mesh.v1.GetAgentInfoRequest\x1a\x1d.mesh.v1.GetAgentInfoResponseB0Z.github.com/itaic/agent-mesh/pkg/mesh/pb;meshpbb\x06proto3"
+	"\fGetAgentInfo\x12\x1c.mesh.v1.GetAgentInfoRequest\x1a\x1d.mesh.v1.GetAgentInfoResponse\x12F\n" +
+	"\fWatchSubTask\x12\x1c.mesh.v1.WatchSubTaskRequest\x1a\x16.mesh.v1.SubTaskUpdate0\x01B0Z.github.com/itaic/agent-mesh/pkg/mesh/pb;meshpbb\x06proto3"
 
 var (
 	file_mesh_proto_rawDescOnce sync.Once
@@ -310,25 +614,39 @@ func file_mesh_proto_rawDescGZIP() []byte {
 	return file_mesh_proto_rawDescData
 }
 
-var file_mesh_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_mesh_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_mesh_proto_goTypes = []any{
 	(*CreateSubTaskRequest)(nil),  // 0: mesh.v1.CreateSubTaskRequest
 	(*CreateSubTaskResponse)(nil), // 1: mesh.v1.CreateSubTaskResponse
 	(*GetAgentInfoRequest)(nil),   // 2: mesh.v1.GetAgentInfoRequest
 	(*GetAgentInfoResponse)(nil),  // 3: mesh.v1.GetAgentInfoResponse
-	(*pb.Message)(nil),            // 4: a2a.v1.Message
+	(*WatchSubTaskRequest)(nil),   // 4: mesh.v1.WatchSubTaskRequest
+	(*SubTaskStatus)(nil),         // 5: mesh.v1.SubTaskStatus
+	(*ThoughtEvent)(nil),          // 6: mesh.v1.ThoughtEvent
+	(*SubTaskUpdate)(nil),         // 7: mesh.v1.SubTaskUpdate
+	(*pb.Message)(nil),            // 8: a2a.v1.Message
+	(pb.TaskState)(0),             // 9: a2a.v1.TaskState
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
+	(*pb.Artifact)(nil),           // 11: a2a.v1.Artifact
 }
 var file_mesh_proto_depIdxs = []int32{
-	4, // 0: mesh.v1.CreateSubTaskRequest.message:type_name -> a2a.v1.Message
-	0, // 1: mesh.v1.MeshService.CreateSubTask:input_type -> mesh.v1.CreateSubTaskRequest
-	2, // 2: mesh.v1.MeshService.GetAgentInfo:input_type -> mesh.v1.GetAgentInfoRequest
-	1, // 3: mesh.v1.MeshService.CreateSubTask:output_type -> mesh.v1.CreateSubTaskResponse
-	3, // 4: mesh.v1.MeshService.GetAgentInfo:output_type -> mesh.v1.GetAgentInfoResponse
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	8,  // 0: mesh.v1.CreateSubTaskRequest.message:type_name -> a2a.v1.Message
+	9,  // 1: mesh.v1.SubTaskStatus.state:type_name -> a2a.v1.TaskState
+	10, // 2: mesh.v1.ThoughtEvent.ts:type_name -> google.protobuf.Timestamp
+	5,  // 3: mesh.v1.SubTaskUpdate.status_update:type_name -> mesh.v1.SubTaskStatus
+	6,  // 4: mesh.v1.SubTaskUpdate.thought_event:type_name -> mesh.v1.ThoughtEvent
+	11, // 5: mesh.v1.SubTaskUpdate.artifact_update:type_name -> a2a.v1.Artifact
+	0,  // 6: mesh.v1.MeshService.CreateSubTask:input_type -> mesh.v1.CreateSubTaskRequest
+	2,  // 7: mesh.v1.MeshService.GetAgentInfo:input_type -> mesh.v1.GetAgentInfoRequest
+	4,  // 8: mesh.v1.MeshService.WatchSubTask:input_type -> mesh.v1.WatchSubTaskRequest
+	1,  // 9: mesh.v1.MeshService.CreateSubTask:output_type -> mesh.v1.CreateSubTaskResponse
+	3,  // 10: mesh.v1.MeshService.GetAgentInfo:output_type -> mesh.v1.GetAgentInfoResponse
+	7,  // 11: mesh.v1.MeshService.WatchSubTask:output_type -> mesh.v1.SubTaskUpdate
+	9,  // [9:12] is the sub-list for method output_type
+	6,  // [6:9] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_mesh_proto_init() }
@@ -336,13 +654,18 @@ func file_mesh_proto_init() {
 	if File_mesh_proto != nil {
 		return
 	}
+	file_mesh_proto_msgTypes[7].OneofWrappers = []any{
+		(*SubTaskUpdate_StatusUpdate)(nil),
+		(*SubTaskUpdate_ThoughtEvent)(nil),
+		(*SubTaskUpdate_ArtifactUpdate)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_mesh_proto_rawDesc), len(file_mesh_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
