@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -55,6 +56,7 @@ type grpcRunnable struct {
 func NewRunnable(addr string, meshSrv meshpb.MeshServiceServer) manager.Runnable {
 	srv := grpc.NewServer()
 	meshpb.RegisterMeshServiceServer(srv, meshSrv)
+	reflection.Register(srv) // lets grpcurl (and similar) introspect the service without -proto flags
 	return &grpcRunnable{srv: srv, addr: addr}
 }
 

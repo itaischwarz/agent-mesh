@@ -14,6 +14,8 @@ import (
 
 	meshv1alpha1 "github.com/itaic/agent-mesh/api/v1alpha1"
 	"github.com/itaic/agent-mesh/internal/controller"
+	"github.com/itaic/agent-mesh/internal/meshserver"
+	"github.com/itaic/agent-mesh/pkg/mesh"
 )
 
 var scheme = newScheme()
@@ -27,9 +29,11 @@ func newScheme() *runtime.Scheme {
 func main() {
 	var metricsAddr string
 	var probeAddr string
+	var meshAddr string
 	var enableLeaderElection bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "metrics endpoint")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "health probe endpoint")
+	flag.StringVar(&meshAddr, "mesh-bind-address", mesh.DefaultAddr, "mesh gRPC service bind address")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "enable leader election for HA")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -61,6 +65,12 @@ func main() {
 		Client: mgr.GetClient(),
 	}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.Error(err, "unable to create controller", "controller", "Task")
+		os.Exit(1)
+	}
+
+	meshSrv := &meshserver.Server{Client: mgr.GetClient()}
+	if err := mgr.Add(meshserver.NewRunnable(meshAddr, meshSrv)); err != nil {
+		ctrl.Log.Error(err, "unable to add mesh grpc server")
 		os.Exit(1)
 	}
 
