@@ -1,188 +1,195 @@
-// Package a2aconv converts between the CRD's Message/Part/Artifact shapes
-// (api/v1alpha1, which can't express a proto oneof directly) and the A2A
-// wire types (pkg/a2a/pb). Both internal/controller (mirroring remote task
-// state onto status) and internal/meshserver (building a Task from an
-// inbound CreateSubTaskRequest) need this same translation, so it lives
-// here rather than being owned by — and duplicated for — either one.
+// Package a2aconv converts between the CRD's Message/Part/Artifact/TaskState
+// shapes (api/v1alpha1) and the official A2A v1.0 Go types from
+// github.com/a2aproject/a2a-go/v2/a2a. Both internal/controller (mirroring a
+// remote agent's task onto Task.status) and internal/meshserver (serving
+// that status back out over A2A) need the same translation, so it lives here.
 package a2aconv
 
 import (
 	"encoding/json"
 
-	"google.golang.org/protobuf/types/known/structpb"
+	"github.com/a2aproject/a2a-go/v2/a2a"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	meshv1alpha1 "github.com/itaic/agent-mesh/api/v1alpha1"
-	a2apb "github.com/itaic/agent-mesh/pkg/a2a/pb"
 )
 
-// ToProtoMessage converts the CRD's Message into the wire Message the
-// generated client expects.
-func ToProtoMessage(m meshv1alpha1.Message) *a2apb.Message {
-	role := a2apb.Message_USER
+// ToA2AMessage converts the CRD's Message into an A2A message with the given
+// messageId. Callers should pass a stable id (e.g. the Task's UID) so a
+// retried send is recognizable as the same message.
+func ToA2AMessage(m meshv1alpha1.Message, id, contextID string) *a2a.Message {
+	role := a2a.MessageRoleUser
 	if m.Role == "agent" {
-		role = a2apb.Message_AGENT
+		role = a2a.MessageRoleAgent
 	}
-	parts := make([]*a2apb.Part, 0, len(m.Parts))
-	for _, p := range m.Parts {
-		part := &a2apb.Part{MimeType: p.MimeType}
-		switch p.Kind {
-		case "text":
-			part.Content = &a2apb.Part_Text{Text: p.Text}
-		case "file":
-			part.Content = &a2apb.Part_FileUri{FileUri: p.FileURI}
-		case "data":
-			if p.Data != nil {
-				part.Content = &a2apb.Part_Data{Data: StructFromRawExtension(p.Data)}
-			}
-		}
-		parts = append(parts, part)
+	return &a2a.Message{
+		ID:        id,
+		ContextID: contextID,
+		Role:      role,
+		Parts:     ToA2AParts(m.Parts),
 	}
-	return &a2apb.Message{Role: role, Parts: parts}
 }
 
-// FromProtoMessage converts a wire Message back into the CRD-friendly shape.
-func FromProtoMessage(m *a2apb.Message) *meshv1alpha1.Message {
+// FromA2AMessage converts an A2A message back into the CRD's shape.
+func FromA2AMessage(m *a2a.Message) *meshv1alpha1.Message {
 	if m == nil {
 		return nil
 	}
 	role := "user"
-	if m.Role == a2apb.Message_AGENT {
+	if m.Role == a2a.MessageRoleAgent {
 		role = "agent"
 	}
-	parts := make([]meshv1alpha1.Part, 0, len(m.Parts))
-	for _, p := range m.Parts {
-		out := meshv1alpha1.Part{MimeType: p.MimeType}
-		switch c := p.Content.(type) {
-		case *a2apb.Part_Text:
-			out.Kind = "text"
-			out.Text = c.Text
-		case *a2apb.Part_FileUri:
-			out.Kind = "file"
-			out.FileURI = c.FileUri
-		case *a2apb.Part_Data:
-			out.Kind = "data"
-			out.Data = RawExtensionFromStruct(c.Data)
-		}
-		parts = append(parts, out)
-	}
-	return &meshv1alpha1.Message{Role: role, Parts: parts}
+	return &meshv1alpha1.Message{Role: role, Parts: FromA2AParts(m.Parts)}
 }
 
-// FromProtoArtifact converts a wire Artifact into the CRD-friendly shape.
-func FromProtoArtifact(a *a2apb.Artifact) meshv1alpha1.Artifact {
-	parts := make([]meshv1alpha1.Part, 0, len(a.Parts))
-	for _, p := range a.Parts {
-		cp := meshv1alpha1.Part{MimeType: p.MimeType}
-		switch c := p.Content.(type) {
-		case *a2apb.Part_Text:
-			cp.Kind, cp.Text = "text", c.Text
-		case *a2apb.Part_FileUri:
-			cp.Kind, cp.FileURI = "file", c.FileUri
-		case *a2apb.Part_Data:
-			cp.Kind, cp.Data = "data", RawExtensionFromStruct(c.Data)
-		}
-		parts = append(parts, cp)
-	}
-	return meshv1alpha1.Artifact{Name: a.Name, Parts: parts}
-}
-
-// ToProtoArtifact converts the CRD's Artifact into the wire shape, for
-// re-streaming a Task's accumulated artifacts back out (WatchSubTask).
-func ToProtoArtifact(a meshv1alpha1.Artifact) *a2apb.Artifact {
-	parts := make([]*a2apb.Part, 0, len(a.Parts))
-	for _, p := range a.Parts {
-		part := &a2apb.Part{MimeType: p.MimeType}
+// ToA2AParts converts CRD parts into A2A parts.
+func ToA2AParts(parts []meshv1alpha1.Part) a2a.ContentParts {
+	out := make(a2a.ContentParts, 0, len(parts))
+	for _, p := range parts {
+		var part *a2a.Part
 		switch p.Kind {
 		case "text":
-			part.Content = &a2apb.Part_Text{Text: p.Text}
+			part = a2a.NewTextPart(p.Text)
 		case "file":
-			part.Content = &a2apb.Part_FileUri{FileUri: p.FileURI}
+			part = a2a.NewFileURLPart(a2a.URL(p.FileURI), p.MimeType)
+		case "raw":
+			part = a2a.NewRawPart(p.Raw)
 		case "data":
-			if p.Data != nil {
-				part.Content = &a2apb.Part_Data{Data: StructFromRawExtension(p.Data)}
-			}
+			part = a2a.NewDataPart(anyFromRawExtension(p.Data))
+		default:
+			continue
 		}
-		parts = append(parts, part)
+		part.MediaType = p.MimeType
+		part.Filename = p.Filename
+		out = append(out, part)
 	}
-	return &a2apb.Artifact{Name: a.Name, Parts: parts}
+	return out
 }
 
-// FromProtoTaskState maps the wire TaskState enum onto the CRD's string enum.
-func FromProtoTaskState(s a2apb.TaskState) meshv1alpha1.TaskState {
-	switch s {
-	case a2apb.TaskState_SUBMITTED:
-		return meshv1alpha1.TaskStateSubmitted
-	case a2apb.TaskState_WORKING:
-		return meshv1alpha1.TaskStateWorking
-	case a2apb.TaskState_INPUT_REQUIRED:
-		return meshv1alpha1.TaskStateInputRequired
-	case a2apb.TaskState_AUTH_REQUIRED:
-		return meshv1alpha1.TaskStateAuthRequired
-	case a2apb.TaskState_COMPLETED:
-		return meshv1alpha1.TaskStateCompleted
-	case a2apb.TaskState_CANCELED:
-		return meshv1alpha1.TaskStateCanceled
-	case a2apb.TaskState_FAILED:
-		return meshv1alpha1.TaskStateFailed
-	case a2apb.TaskState_REJECTED:
-		return meshv1alpha1.TaskStateRejected
-	default:
-		return meshv1alpha1.TaskStateUnknown
+// FromA2AParts converts A2A parts into CRD parts.
+func FromA2AParts(parts a2a.ContentParts) []meshv1alpha1.Part {
+	out := make([]meshv1alpha1.Part, 0, len(parts))
+	for _, p := range parts {
+		if p == nil {
+			continue
+		}
+		cp := meshv1alpha1.Part{MimeType: p.MediaType, Filename: p.Filename}
+		switch c := p.Content.(type) {
+		case a2a.Text:
+			cp.Kind, cp.Text = "text", string(c)
+		case a2a.URL:
+			cp.Kind, cp.FileURI = "file", string(c)
+		case a2a.Raw:
+			cp.Kind, cp.Raw = "raw", []byte(c)
+		case a2a.Data:
+			cp.Kind, cp.Data = "data", rawExtensionFromAny(c.Value)
+		default:
+			continue
+		}
+		out = append(out, cp)
+	}
+	return out
+}
+
+// FromA2AArtifact converts an A2A artifact into the CRD's shape.
+func FromA2AArtifact(a *a2a.Artifact) meshv1alpha1.Artifact {
+	return meshv1alpha1.Artifact{ID: string(a.ID), Name: a.Name, Parts: FromA2AParts(a.Parts)}
+}
+
+// ToA2AArtifact converts a CRD artifact into an A2A artifact.
+func ToA2AArtifact(a meshv1alpha1.Artifact) *a2a.Artifact {
+	return &a2a.Artifact{ID: a2a.ArtifactID(a.ID), Name: a.Name, Parts: ToA2AParts(a.Parts)}
+}
+
+var toCRDState = map[a2a.TaskState]meshv1alpha1.TaskState{
+	a2a.TaskStateSubmitted:     meshv1alpha1.TaskStateSubmitted,
+	a2a.TaskStateWorking:       meshv1alpha1.TaskStateWorking,
+	a2a.TaskStateInputRequired: meshv1alpha1.TaskStateInputRequired,
+	a2a.TaskStateAuthRequired:  meshv1alpha1.TaskStateAuthRequired,
+	a2a.TaskStateCompleted:     meshv1alpha1.TaskStateCompleted,
+	a2a.TaskStateCanceled:      meshv1alpha1.TaskStateCanceled,
+	a2a.TaskStateFailed:        meshv1alpha1.TaskStateFailed,
+	a2a.TaskStateRejected:      meshv1alpha1.TaskStateRejected,
+}
+
+// FromA2ATaskState maps an A2A task state onto the CRD's state enum.
+func FromA2ATaskState(s a2a.TaskState) meshv1alpha1.TaskState {
+	if st, ok := toCRDState[s]; ok {
+		return st
+	}
+	return meshv1alpha1.TaskStateUnknown
+}
+
+// ToA2ATaskState is FromA2ATaskState's inverse.
+func ToA2ATaskState(s meshv1alpha1.TaskState) a2a.TaskState {
+	for a2aState, crdState := range toCRDState {
+		if crdState == s {
+			return a2aState
+		}
+	}
+	return a2a.TaskStateUnspecified
+}
+
+// ApplyTask copies a full A2A task snapshot onto Task.status.
+func ApplyTask(status *meshv1alpha1.TaskStatus, remote *a2a.Task) {
+	status.TaskID = string(remote.ID)
+	ApplyStatus(status, remote.Status)
+	status.Artifacts = make([]meshv1alpha1.Artifact, 0, len(remote.Artifacts))
+	for _, a := range remote.Artifacts {
+		if a != nil {
+			status.Artifacts = append(status.Artifacts, FromA2AArtifact(a))
+		}
 	}
 }
 
-// ToProtoTaskState is FromProtoTaskState's inverse, for re-streaming a
-// Task CR's status.state back out over the wire (WatchSubTask).
-func ToProtoTaskState(s meshv1alpha1.TaskState) a2apb.TaskState {
-	switch s {
-	case meshv1alpha1.TaskStateSubmitted:
-		return a2apb.TaskState_SUBMITTED
-	case meshv1alpha1.TaskStateWorking:
-		return a2apb.TaskState_WORKING
-	case meshv1alpha1.TaskStateInputRequired:
-		return a2apb.TaskState_INPUT_REQUIRED
-	case meshv1alpha1.TaskStateAuthRequired:
-		return a2apb.TaskState_AUTH_REQUIRED
-	case meshv1alpha1.TaskStateCompleted:
-		return a2apb.TaskState_COMPLETED
-	case meshv1alpha1.TaskStateCanceled:
-		return a2apb.TaskState_CANCELED
-	case meshv1alpha1.TaskStateFailed:
-		return a2apb.TaskState_FAILED
-	case meshv1alpha1.TaskStateRejected:
-		return a2apb.TaskState_REJECTED
-	default:
-		return a2apb.TaskState_TASK_STATE_UNSPECIFIED
+// ApplyStatus copies an A2A task status (state + message) onto Task.status.
+// A status update with no message keeps the previous one, so a bare state
+// transition doesn't wipe the agent's last narration.
+func ApplyStatus(status *meshv1alpha1.TaskStatus, s a2a.TaskStatus) {
+	status.State = FromA2ATaskState(s.State)
+	if s.Message != nil {
+		status.StatusMessage = FromA2AMessage(s.Message)
 	}
 }
 
-// StructFromRawExtension converts a CRD's arbitrary JSON blob (a data Part)
-// into a protobuf Struct for the wire. Errors are swallowed into an empty
-// struct rather than failing the whole call over a malformed data part —
-// callers that need stricter behavior should validate upstream.
-func StructFromRawExtension(raw *runtime.RawExtension) *structpb.Struct {
+// UpsertArtifact folds a streamed artifact update into Task.status.artifacts:
+// append=true extends the parts of the artifact with the same ID, otherwise
+// the artifact replaces any existing one with that ID or is added.
+func UpsertArtifact(status *meshv1alpha1.TaskStatus, ev *a2a.TaskArtifactUpdateEvent) {
+	if ev == nil || ev.Artifact == nil {
+		return
+	}
+	incoming := FromA2AArtifact(ev.Artifact)
+	for i := range status.Artifacts {
+		if status.Artifacts[i].ID != incoming.ID {
+			continue
+		}
+		if ev.Append {
+			status.Artifacts[i].Parts = append(status.Artifacts[i].Parts, incoming.Parts...)
+		} else {
+			status.Artifacts[i] = incoming
+		}
+		return
+	}
+	status.Artifacts = append(status.Artifacts, incoming)
+}
+
+func anyFromRawExtension(raw *runtime.RawExtension) any {
 	if raw == nil || len(raw.Raw) == 0 {
-		return &structpb.Struct{}
-	}
-	var m map[string]any
-	if err := json.Unmarshal(raw.Raw, &m); err != nil {
-		return &structpb.Struct{}
-	}
-	s, err := structpb.NewStruct(m)
-	if err != nil {
-		return &structpb.Struct{}
-	}
-	return s
-}
-
-// RawExtensionFromStruct converts a wire Struct back into the CRD's
-// arbitrary-JSON-blob shape.
-func RawExtensionFromStruct(s *structpb.Struct) *runtime.RawExtension {
-	if s == nil {
 		return nil
 	}
-	b, err := json.Marshal(s.AsMap())
+	var v any
+	if err := json.Unmarshal(raw.Raw, &v); err != nil {
+		return nil
+	}
+	return v
+}
+
+func rawExtensionFromAny(v any) *runtime.RawExtension {
+	if v == nil {
+		return nil
+	}
+	b, err := json.Marshal(v)
 	if err != nil {
 		return nil
 	}

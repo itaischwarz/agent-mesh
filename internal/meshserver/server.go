@@ -1,17 +1,20 @@
+// Package meshserver makes agent-mesh itself an A2A v1.0 agent. A caller
+// sends it an ordinary A2A message naming a target Agent in the request
+// metadata (see pkg/mesh); the mesh records the delegation as a Task
+// resource, which TaskReconciler dispatches to the target, and relays the
+// Task's progress back to the caller as standard A2A task events.
 package meshserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net"
-	"strings"
+	"iter"
+	"net/http"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/reflection"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -20,272 +23,267 @@ import (
 
 	meshv1alpha1 "github.com/itaic/agent-mesh/api/v1alpha1"
 	"github.com/itaic/agent-mesh/internal/a2aconv"
-	meshpb "github.com/itaic/agent-mesh/pkg/mesh/pb"
+	"github.com/itaic/agent-mesh/pkg/mesh"
 )
 
-// watchPollInterval is how often WatchSubTask re-Gets the Task CR. This is a
-// poll under the hood, not a real k8s Watch — same tradeoff TaskReconciler
-// itself had before streamAgent existed. A real Watch (client.WithWatch, or
-// hooking the manager's informer) would remove the latency later; polling a
-// single object is cheap enough to start with and needs no new client type.
-const watchPollInterval = 2 * time.Second
+// labelA2ATaskID ties a Task resource to the A2A task id the mesh gave its
+// caller, so Cancel can find the resource to delete.
+const labelA2ATaskID = "mesh.itai.dev/a2a-task-id"
 
-// Server implements meshpb.MeshServiceServer: the inbound side agent pods
-// call to reach the rest of the mesh (the inverse of pkg/a2a/client, which
-// is agent-mesh calling out to an agent). It holds the same controller-runtime
-// client the reconcilers use, so CreateSubTask/GetAgentInfo just Create/Get
-// CRs like any reconciler would.
-type Server struct {
-	meshpb.UnimplementedMeshServiceServer
+// relayPollInterval is how often the mesh re-reads a delegated Task resource
+// to relay its progress. A watch would remove this latency later.
+const relayPollInterval = time.Second
+
+// Executor implements a2asrv.AgentExecutor (handling requests sent to the
+// mesh) and a2asrv.AgentCardProducer (the mesh's own agent card).
+type Executor struct {
 	client.Client
+	// Namespace is where target Agents are looked up and Tasks created,
+	// unless the caller overrides it with mesh.MetaNamespace.
+	Namespace string
+	// PublicURL is the URL the mesh advertises in its agent card.
+	PublicURL string
 }
 
-// grpcRunnable adapts a *grpc.Server into a manager.Runnable (Start(ctx)
-// error) so main.go can hand it to mgr.Add and get the same startup/graceful
-// -shutdown lifecycle the reconcilers already get, instead of a bare goroutine.
-type grpcRunnable struct {
-	srv  *grpc.Server
-	addr string
+var (
+	_ a2asrv.AgentExecutor     = (*Executor)(nil)
+	_ a2asrv.AgentCardProducer = (*Executor)(nil)
+)
+
+// Execute delegates the incoming message to the target agent by creating a
+// Task resource, then relays that resource's progress as A2A events.
+func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
+	return func(yield func(a2a.Event, error) bool) {
+		if execCtx.StoredTask != nil {
+			yield(nil, fmt.Errorf("%w: follow-up messages to an existing mesh task are not supported yet", a2a.ErrUnsupportedOperation))
+			return
+		}
+		target, ns := metaString(execCtx, mesh.MetaTargetAgent), metaString(execCtx, mesh.MetaNamespace)
+		if ns == "" {
+			ns = e.Namespace
+		}
+		if target == "" {
+			yield(nil, fmt.Errorf("%w: request metadata must set %q to the agent to delegate to", a2a.ErrInvalidParams, mesh.MetaTargetAgent))
+			return
+		}
+		var agent meshv1alpha1.Agent
+		if err := e.Get(ctx, types.NamespacedName{Name: target, Namespace: ns}, &agent); err != nil {
+			if apierrors.IsNotFound(err) {
+				err = fmt.Errorf("%w: agent %q not found in namespace %q", a2a.ErrInvalidParams, target, ns)
+			}
+			yield(nil, err)
+			return
+		}
+
+		cr := &meshv1alpha1.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: target + "-",
+				Namespace:    ns,
+				Labels:       map[string]string{labelA2ATaskID: string(execCtx.TaskID)},
+			},
+			Spec: meshv1alpha1.TaskSpec{
+				AgentRef:  target,
+				SkillID:   metaString(execCtx, mesh.MetaSkillID),
+				Message:   *a2aconv.FromA2AMessage(execCtx.Message),
+				ContextID: execCtx.ContextID,
+			},
+		}
+		if err := e.Create(ctx, cr); err != nil {
+			yield(nil, fmt.Errorf("creating task resource: %w", err))
+			return
+		}
+
+		submitted := a2a.NewSubmittedTask(execCtx, execCtx.Message)
+		submitted.Metadata = map[string]any{mesh.MetaTaskName: cr.Name, mesh.MetaNamespace: ns}
+		if !yield(submitted, nil) {
+			return
+		}
+		e.relay(ctx, execCtx, client.ObjectKeyFromObject(cr), yield)
+	}
 }
 
-// NewRunnable builds a *grpc.Server, registers meshSrv as the MeshService
-// implementation, and returns it wrapped as a manager.Runnable ready for
-// mgr.Add. grpc.NewServer()'s return value is what satisfies
-// grpc.ServiceRegistrar — RegisterMeshServiceServer's first argument —
-// which is why registration happens here rather than inside Start.
-func NewRunnable(addr string, meshSrv meshpb.MeshServiceServer) manager.Runnable {
-	srv := grpc.NewServer()
-	meshpb.RegisterMeshServiceServer(srv, meshSrv)
-	reflection.Register(srv) // lets grpcurl (and similar) introspect the service without -proto flags
-	return &grpcRunnable{srv: srv, addr: addr}
+// relay re-reads the Task resource until it's terminal, yielding an artifact
+// event for each new or changed artifact and a status event whenever the
+// state or status message changes. Artifacts go first so a terminal status
+// arrives after the deliverables from the same read.
+func (e *Executor) relay(ctx context.Context, execCtx *a2asrv.ExecutorContext, key client.ObjectKey, yield func(a2a.Event, error) bool) {
+	sentParts := map[string]int{} // artifact id -> parts already relayed
+	var lastState a2a.TaskState = a2a.TaskStateSubmitted
+	var lastMsg string
+
+	ticker := time.NewTicker(relayPollInterval)
+	defer ticker.Stop()
+	for {
+		var cr meshv1alpha1.Task
+		if err := e.Get(ctx, key, &cr); err != nil {
+			if apierrors.IsNotFound(err) {
+				yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCanceled, agentText("delegated task was deleted")), nil)
+			} else {
+				yield(nil, err)
+			}
+			return
+		}
+
+		for _, art := range cr.Status.Artifacts {
+			if sentParts[art.ID] == len(art.Parts) {
+				continue
+			}
+			sentParts[art.ID] = len(art.Parts)
+			ev := &a2a.TaskArtifactUpdateEvent{
+				TaskID: execCtx.TaskID, ContextID: execCtx.ContextID,
+				Artifact: a2aconv.ToA2AArtifact(art),
+			}
+			if !yield(ev, nil) {
+				return
+			}
+		}
+
+		state := relayState(&cr)
+		msg := cr.Status.StatusMessage
+		msgKey := fmt.Sprint(msg)
+		if state != a2a.TaskStateUnspecified && (state != lastState || msgKey != lastMsg) {
+			lastState, lastMsg = state, msgKey
+			var a2aMsg *a2a.Message
+			if msg != nil {
+				a2aMsg = a2aconv.ToA2AMessage(*msg, a2a.NewMessageID(), execCtx.ContextID)
+				a2aMsg.TaskID = execCtx.TaskID
+			}
+			if !yield(a2a.NewStatusUpdateEvent(execCtx, state, a2aMsg), nil) {
+				return
+			}
+			if state.Terminal() {
+				return
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
-// Start implements manager.Runnable. It binds addr, serves until ctx is
-// canceled, then drains in-flight RPCs (GracefulStop) before returning.
-func (g *grpcRunnable) Start(ctx context.Context) error {
-	lis, err := net.Listen("tcp", g.addr)
-	if err != nil {
-		return fmt.Errorf("binding mesh grpc server on %s: %w", g.addr, err)
+// relayState maps the Task resource's state to what the mesh's caller sees.
+// "unknown" means either the target isn't ready yet (stay submitted) or the
+// target lost the task (report failure).
+func relayState(cr *meshv1alpha1.Task) a2a.TaskState {
+	if cr.Status.State != meshv1alpha1.TaskStateUnknown {
+		return a2aconv.ToA2ATaskState(cr.Status.State)
 	}
-
-	go func() {
-		<-ctx.Done()
-		g.srv.GracefulStop()
-	}()
-
-	if err := g.srv.Serve(lis); err != nil {
-		return fmt.Errorf("mesh grpc server: %w", err)
+	for _, c := range cr.Status.Conditions {
+		if c.Type == "Dispatched" && c.Reason == "TaskGone" {
+			return a2a.TaskStateFailed
+		}
 	}
-	return nil
+	return a2a.TaskStateUnspecified
 }
 
-// CreateSubTask creates a Task CR on the caller's behalf, targeting
-// req.TargetAgentRef. It does not dial the target agent itself — writing
-// the CR is the entire job here. TaskReconciler is the only thing that ever
-// calls SendMessage (task_controller.go), and it owns dispatch, streaming,
-// and status from that point on. See below for why that split matters.
-func (s *Server) CreateSubTask(ctx context.Context, req *meshpb.CreateSubTaskRequest) (*meshpb.CreateSubTaskResponse, error) {
-	switch {
-	case req.GetTargetAgentRef() == "":
-		return nil, status.Error(codes.InvalidArgument, "target_agent_ref is required")
-	case req.GetNamespace() == "":
-		return nil, status.Error(codes.InvalidArgument, "namespace is required")
-	case req.GetMessage() == nil:
-		return nil, status.Error(codes.InvalidArgument, "message is required")
+// Cancel deletes the delegated Task resource; its finalizer asks the target
+// agent to cancel before the resource goes away.
+func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
+	return func(yield func(a2a.Event, error) bool) {
+		var list meshv1alpha1.TaskList
+		if err := e.List(ctx, &list, client.MatchingLabels{labelA2ATaskID: string(execCtx.TaskID)}); err != nil {
+			yield(nil, err)
+			return
+		}
+		for i := range list.Items {
+			if err := e.Delete(ctx, &list.Items[i]); client.IgnoreNotFound(err) != nil {
+				yield(nil, err)
+				return
+			}
+		}
+		yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCanceled, nil), nil)
 	}
-
-	msg := a2aconv.FromProtoMessage(req.GetMessage())
-	task := &meshv1alpha1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: req.GetTargetAgentRef() + "-",
-			Namespace:    req.GetNamespace(),
-		},
-		Spec: meshv1alpha1.TaskSpec{
-			AgentRef:  req.GetTargetAgentRef(),
-			SkillID:   req.GetSkillId(),
-			Message:   *msg,
-			ContextID: req.GetContextId(),
-		},
-	}
-	if err := s.Create(ctx, task); err != nil {
-		return nil, status.Errorf(codes.Internal, "creating subtask: %v", err)
-	}
-	return &meshpb.CreateSubTaskResponse{TaskId: task.Name}, nil
 }
 
-// GetAgentInfo reports a named Agent's declared skills and readiness.
-func (s *Server) GetAgentInfo(ctx context.Context, req *meshpb.GetAgentInfoRequest) (*meshpb.GetAgentInfoResponse, error) {
-	var agent meshv1alpha1.Agent
-	err := s.Get(ctx, types.NamespacedName{Name: req.AgentRef, Namespace: req.Namespace}, &agent)
-	if apierrors.IsNotFound(err) {
-		return nil, status.Error(codes.NotFound, fmt.Sprintf("agent %q not found", req.AgentRef))
-	} else if err != nil {
+// Card builds the mesh's agent card. Each ready Agent in the mesh's
+// namespace is listed as a skill whose id is the value to put in
+// mesh.MetaTargetAgent, so the card doubles as the mesh's directory.
+func (e *Executor) Card(ctx context.Context) (*a2a.AgentCard, error) {
+	var agents meshv1alpha1.AgentList
+	if err := e.List(ctx, &agents, client.InNamespace(e.Namespace)); err != nil {
 		return nil, err
 	}
-
-
-	return &meshpb.GetAgentInfoResponse{
-		Name:        agent.Name,
-		Ready:       agent.Status.Ready,
-		SkillIds:    agent.Status.ObservedCapabilities,
-		Description: agent.Spec.Description,
+	skills := make([]a2a.AgentSkill, 0, len(agents.Items))
+	for _, ag := range agents.Items {
+		if !ag.Status.Ready {
+			continue
+		}
+		tags := ag.Status.ObservedCapabilities
+		if tags == nil {
+			tags = []string{}
+		}
+		skills = append(skills, a2a.AgentSkill{
+			ID:          ag.Name,
+			Name:        ag.Name,
+			Description: ag.Spec.Description,
+			Tags:        tags,
+		})
+	}
+	return &a2a.AgentCard{
+		Name: "agent-mesh",
+		Description: fmt.Sprintf("Delegates tasks to agents running in the mesh. Set request metadata %q "+
+			"to one of this card's skill ids.", mesh.MetaTargetAgent),
+		Version:             "0.1.0",
+		SupportedInterfaces: []*a2a.AgentInterface{a2a.NewAgentInterface(e.PublicURL, a2a.TransportProtocolJSONRPC)},
+		Capabilities:        a2a.AgentCapabilities{Streaming: true},
+		DefaultInputModes:   []string{"text/plain"},
+		DefaultOutputModes:  []string{"text/plain"},
+		Skills:              skills,
 	}, nil
 }
 
-
-
-// WatchSubTask streams SubTaskUpdates for one Task CR until it reaches a
-// terminal state. It's the consumer half: pollSubTask does the actual work
-// and hands back a channel of already-built *meshpb.SubTaskUpdate, this just
-// loops and Sends each one — same producer/consumer split as
-// TaskReconciler's streamAgent/consumeStream, one layer further out.
-func (s *Server) WatchSubTask(req *meshpb.WatchSubTaskRequest, stream meshpb.MeshService_WatchSubTaskServer) error {
-	if req.GetTaskId() == "" || req.GetNamespace() == "" {
-		return status.Error(codes.InvalidArgument, "task_id and namespace are required")
+// metaString reads a string metadata value from the request, falling back
+// to the message's own metadata.
+func metaString(execCtx *a2asrv.ExecutorContext, key string) string {
+	if v, ok := execCtx.Metadata[key].(string); ok && v != "" {
+		return v
 	}
-	ctx := stream.Context()
-	key := types.NamespacedName{Name: req.GetTaskId(), Namespace: req.GetNamespace()}
-
-	out, errc := s.pollSubTask(ctx, key)
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-
-		case err := <-errc:
-			return err
-
-		case update, ok := <-out:
-			if !ok {
-				return nil
-			}
-			if err := stream.Send(update); err != nil {
-				return err
-			}
-			if update.GetFinal() {
-				return nil
-			}
+	if execCtx.Message != nil {
+		if v, ok := execCtx.Message.Metadata[key].(string); ok {
+			return v
 		}
 	}
+	return ""
 }
 
-// pollSubTask re-Gets the Task CR every watchPollInterval and, whenever
-// something changed since the last tick, emits one fully-built
-// *meshpb.SubTaskUpdate onto out — in the order artifacts, then thought,
-// then status, so a terminal status update (Final: true) arrives after any
-// deliverables/narration from the same tick, not before. out is closed when
-// the task goes terminal or ctx is canceled; errc receives at most one value
-// (Get failing) and is left open, same convention as streamAgent's errc.
-func (s *Server) pollSubTask(ctx context.Context, key types.NamespacedName) (<-chan *meshpb.SubTaskUpdate, <-chan error) {
-	out := make(chan *meshpb.SubTaskUpdate, 16)
+func agentText(text string) *a2a.Message {
+	return a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(text))
+}
+
+// httpRunnable serves the mesh's A2A endpoint as a manager.Runnable so it
+// shares the manager's startup and graceful shutdown.
+type httpRunnable struct {
+	srv *http.Server
+}
+
+// NewRunnable serves exec over A2A JSON-RPC at addr, with its agent card at
+// the standard well-known path.
+func NewRunnable(addr string, exec *Executor) manager.Runnable {
+	mux := http.NewServeMux()
+	mux.Handle(a2asrv.WellKnownAgentCardPath, a2asrv.NewAgentCardHandler(exec))
+	mux.Handle("/", a2asrv.NewJSONRPCHandler(a2asrv.NewHandler(exec)))
+	return &httpRunnable{srv: &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}}
+}
+
+func (h *httpRunnable) Start(ctx context.Context) error {
 	errc := make(chan error, 1)
-
-	go func() {
-		defer close(out)
-
-		var lastState meshv1alpha1.TaskState
-		var lastThought string
-		var sentArtifacts int
-		var seq uint64
-
-		ticker := time.NewTicker(watchPollInterval)
-		defer ticker.Stop()
-
-		for {
-			var task meshv1alpha1.Task
-			err := s.Get(ctx, key, &task)
-			switch {
-			case apierrors.IsNotFound(err):
-				errc <- status.Errorf(codes.NotFound, "subtask %q not found", key.Name)
-				return
-			case err != nil:
-				errc <- err
-				return
-			}
-
-			// Artifacts: the actual deliverables, flush any new ones first.
-			for sentArtifacts < len(task.Status.Artifacts) {
-				update := &meshpb.SubTaskUpdate{
-					Event: &meshpb.SubTaskUpdate_ArtifactUpdate{
-						ArtifactUpdate: a2aconv.ToProtoArtifact(task.Status.Artifacts[sentArtifacts]),
-					},
-				}
-				select {
-				case out <- update:
-				case <-ctx.Done():
-					return
-				}
-				sentArtifacts++
-			}
-
-			// Thoughts: the agent's own narration while still working. Only
-			// emitted on change, and only pre-terminal — once done, the
-			// artifacts are the answer, not the play-by-play.
-			if thought := messageText(task.Status.StatusMessage); thought != "" &&
-				thought != lastThought && !task.Status.State.IsTerminal() {
-				lastThought = thought
-				seq++
-				update := &meshpb.SubTaskUpdate{
-					Event: &meshpb.SubTaskUpdate_ThoughtEvent{
-						ThoughtEvent: &meshpb.ThoughtEvent{
-							AgentId: task.Spec.AgentRef,
-							TaskId:  task.Name,
-							Seq:     seq,
-							Ts:      timestamppb.Now(),
-							Content: thought,
-						},
-					},
-				}
-				select {
-				case out <- update:
-				case <-ctx.Done():
-					return
-				}
-			}
-
-			// Status: the lifecycle signal, sent last so Final arrives after
-			// anything else from this tick.
-			if task.Status.State != lastState {
-				lastState = task.Status.State
-				final := task.Status.State.IsTerminal()
-				update := &meshpb.SubTaskUpdate{
-					Event: &meshpb.SubTaskUpdate_StatusUpdate{
-						StatusUpdate: &meshpb.SubTaskStatus{State: a2aconv.ToProtoTaskState(task.Status.State)},
-					},
-					Final: final,
-				}
-				select {
-				case out <- update:
-				case <-ctx.Done():
-					return
-				}
-				if final {
-					return
-				}
-			}
-
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
+	go func() { errc <- h.srv.ListenAndServe() }()
+	select {
+	case err := <-errc:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
 		}
-	}()
-
-	return out, errc
+		return fmt.Errorf("mesh A2A server: %w", err)
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return h.srv.Shutdown(shutdownCtx)
+	}
 }
 
-// messageText flattens a Message's text Parts for ThoughtEvent.Content.
-// Data/file parts carry no narration, so they're skipped rather than erroring.
-func messageText(m *meshv1alpha1.Message) string {
-	if m == nil {
-		return ""
-	}
-	var parts []string
-	for _, p := range m.Parts {
-		if p.Kind == "text" && p.Text != "" {
-			parts = append(parts, p.Text)
-		}
-	}
-	return strings.Join(parts, " ")
-}
+// NeedLeaderElection is false: every manager replica can accept A2A
+// requests, since all state lives in Task resources rather than in memory.
+func (h *httpRunnable) NeedLeaderElection() bool { return false }

@@ -29,8 +29,8 @@ spec:
       openAPIV3Schema:
         description: |-
           Task is the Schema for the tasks API — one unit of A2A work dispatched
-          from the mesh to a target Agent, with status kept in sync by polling
-          (or, once wired up, subscribing to) the agent's task stream.
+          from the mesh to a target Agent, with status kept in sync by subscribing
+          to the agent's task stream (falling back to polling GetTask).
         properties:
           apiVersion:
             description: |-
@@ -69,26 +69,34 @@ spec:
                   parts:
                     items:
                       description: |-
-                        Part is a discriminated union matching A2A's Part type (TextPart /
-                        DataPart / FilePart collapsed into one struct with a kind discriminator,
-                        since CRDs don't support proto oneof directly).
+                        Part is a discriminated union matching A2A v1.0's Part (whose content is a
+                        oneof of text/raw/url/data). CRDs can't express a oneof, so Kind names
+                        which field is set.
                       properties:
                         data:
                           description: Data holds arbitrary structured JSON for kind=data.
                           type: object
                           x-kubernetes-preserve-unknown-fields: true
                         fileURI:
-                          description: |-
-                            FileURI is used for kind=file (agent-mesh resolves it against an
-                            in-cluster artifact store rather than embedding bytes in the CRD).
+                          description: FileURI is the A2A part's url, used for kind=file.
+                          type: string
+                        filename:
                           type: string
                         kind:
                           enum:
                           - text
                           - data
                           - file
+                          - raw
                           type: string
                         mimeType:
+                          description: MimeType is the A2A part's mediaType.
+                          type: string
+                        raw:
+                          description: |-
+                            Raw holds inline bytes for kind=raw. Keep these small: the whole Task
+                            object must fit in etcd's per-object size limit (~1.5MB).
+                          format: byte
                           type: string
                         text:
                           type: string
@@ -107,8 +115,9 @@ spec:
                 type: object
               skillID:
                 description: |-
-                  SkillID optionally pins the task to one of the target Agent's
-                  declared skills; left empty, the agent chooses how to route it.
+                  SkillID optionally names one of the target Agent's declared skills.
+                  A2A v1.0 has no per-request skill selector, so this is forwarded as
+                  request metadata (mesh.itai.dev/skill-id) and is advisory only.
                 type: string
             required:
             - agentRef
@@ -120,17 +129,20 @@ spec:
               artifacts:
                 items:
                   description: |-
-                    Artifact mirrors A2A's Artifact object — a named bundle of output Parts
-                    produced by the agent while working a task.
+                    Artifact mirrors A2A's Artifact object — a bundle of output Parts produced
+                    by the agent while working a task. ID is the agent-assigned artifactId,
+                    which streaming updates use to target (or append to) an existing artifact.
                   properties:
+                    id:
+                      type: string
                     name:
                       type: string
                     parts:
                       items:
                         description: |-
-                          Part is a discriminated union matching A2A's Part type (TextPart /
-                          DataPart / FilePart collapsed into one struct with a kind discriminator,
-                          since CRDs don't support proto oneof directly).
+                          Part is a discriminated union matching A2A v1.0's Part (whose content is a
+                          oneof of text/raw/url/data). CRDs can't express a oneof, so Kind names
+                          which field is set.
                         properties:
                           data:
                             description: Data holds arbitrary structured JSON for
@@ -138,17 +150,25 @@ spec:
                             type: object
                             x-kubernetes-preserve-unknown-fields: true
                           fileURI:
-                            description: |-
-                              FileURI is used for kind=file (agent-mesh resolves it against an
-                              in-cluster artifact store rather than embedding bytes in the CRD).
+                            description: FileURI is the A2A part's url, used for kind=file.
+                            type: string
+                          filename:
                             type: string
                           kind:
                             enum:
                             - text
                             - data
                             - file
+                            - raw
                             type: string
                           mimeType:
+                            description: MimeType is the A2A part's mediaType.
+                            type: string
+                          raw:
+                            description: |-
+                              Raw holds inline bytes for kind=raw. Keep these small: the whole Task
+                              object must fit in etcd's per-object size limit (~1.5MB).
+                            format: byte
                             type: string
                           text:
                             type: string
@@ -247,26 +267,34 @@ spec:
                   parts:
                     items:
                       description: |-
-                        Part is a discriminated union matching A2A's Part type (TextPart /
-                        DataPart / FilePart collapsed into one struct with a kind discriminator,
-                        since CRDs don't support proto oneof directly).
+                        Part is a discriminated union matching A2A v1.0's Part (whose content is a
+                        oneof of text/raw/url/data). CRDs can't express a oneof, so Kind names
+                        which field is set.
                       properties:
                         data:
                           description: Data holds arbitrary structured JSON for kind=data.
                           type: object
                           x-kubernetes-preserve-unknown-fields: true
                         fileURI:
-                          description: |-
-                            FileURI is used for kind=file (agent-mesh resolves it against an
-                            in-cluster artifact store rather than embedding bytes in the CRD).
+                          description: FileURI is the A2A part's url, used for kind=file.
+                          type: string
+                        filename:
                           type: string
                         kind:
                           enum:
                           - text
                           - data
                           - file
+                          - raw
                           type: string
                         mimeType:
+                          description: MimeType is the A2A part's mediaType.
+                          type: string
+                        raw:
+                          description: |-
+                            Raw holds inline bytes for kind=raw. Keep these small: the whole Task
+                            object must fit in etcd's per-object size limit (~1.5MB).
+                          format: byte
                           type: string
                         text:
                           type: string

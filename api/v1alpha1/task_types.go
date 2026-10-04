@@ -24,10 +24,10 @@ const (
 	TaskStateUnknown       TaskState = "unknown"
 )
 
-// IsTerminal reports whether a Task in this state will change on its own —
-// false means TaskReconciler (or a WatchSubTask caller) should keep
-// expecting further updates. Lives on the type itself since both
-// internal/controller and internal/meshserver need the same answer.
+// IsTerminal reports whether a Task in this state is finished — false means
+// TaskReconciler (or a mesh caller subscribed to it) should keep expecting
+// further updates. Lives on the type itself since both internal/controller
+// and internal/meshserver need the same answer.
 func (s TaskState) IsTerminal() bool {
 	switch s {
 	case TaskStateCompleted, TaskStateFailed, TaskStateCanceled, TaskStateRejected:
@@ -37,19 +37,23 @@ func (s TaskState) IsTerminal() bool {
 	}
 }
 
-// Part is a discriminated union matching A2A's Part type (TextPart /
-// DataPart / FilePart collapsed into one struct with a kind discriminator,
-// since CRDs don't support proto oneof directly).
+// Part is a discriminated union matching A2A v1.0's Part (whose content is a
+// oneof of text/raw/url/data). CRDs can't express a oneof, so Kind names
+// which field is set.
 type Part struct {
-	// +kubebuilder:validation:Enum=text;data;file
+	// +kubebuilder:validation:Enum=text;data;file;raw
 	Kind string `json:"kind"`
 	Text string `json:"text,omitempty"`
 	// Data holds arbitrary structured JSON for kind=data.
 	Data *runtime.RawExtension `json:"data,omitempty"`
-	// FileURI is used for kind=file (agent-mesh resolves it against an
-	// in-cluster artifact store rather than embedding bytes in the CRD).
-	FileURI  string `json:"fileURI,omitempty"`
+	// FileURI is the A2A part's url, used for kind=file.
+	FileURI string `json:"fileURI,omitempty"`
+	// Raw holds inline bytes for kind=raw. Keep these small: the whole Task
+	// object must fit in etcd's per-object size limit (~1.5MB).
+	Raw []byte `json:"raw,omitempty"`
+	// MimeType is the A2A part's mediaType.
 	MimeType string `json:"mimeType,omitempty"`
+	Filename string `json:"filename,omitempty"`
 }
 
 // Message mirrors A2A's Message object: a role plus one or more Parts.
@@ -66,8 +70,9 @@ type TaskSpec struct {
 	// +kubebuilder:validation:Required
 	AgentRef string `json:"agentRef"`
 
-	// SkillID optionally pins the task to one of the target Agent's
-	// declared skills; left empty, the agent chooses how to route it.
+	// SkillID optionally names one of the target Agent's declared skills.
+	// A2A v1.0 has no per-request skill selector, so this is forwarded as
+	// request metadata (mesh.itai.dev/skill-id) and is advisory only.
 	SkillID string `json:"skillID,omitempty"`
 
 	// Message is the initial user message sent via A2A SendMessage.
@@ -79,9 +84,11 @@ type TaskSpec struct {
 	ContextID string `json:"contextID,omitempty"`
 }
 
-// Artifact mirrors A2A's Artifact object — a named bundle of output Parts
-// produced by the agent while working a task.
+// Artifact mirrors A2A's Artifact object — a bundle of output Parts produced
+// by the agent while working a task. ID is the agent-assigned artifactId,
+// which streaming updates use to target (or append to) an existing artifact.
 type Artifact struct {
+	ID    string `json:"id,omitempty"`
 	Name  string `json:"name,omitempty"`
 	Parts []Part `json:"parts,omitempty"`
 }
@@ -114,8 +121,8 @@ type TaskStatus struct {
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Task is the Schema for the tasks API — one unit of A2A work dispatched
-// from the mesh to a target Agent, with status kept in sync by polling
-// (or, once wired up, subscribing to) the agent's task stream.
+// from the mesh to a target Agent, with status kept in sync by subscribing
+// to the agent's task stream (falling back to polling GetTask).
 type Task struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

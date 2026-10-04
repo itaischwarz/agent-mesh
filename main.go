@@ -29,11 +29,13 @@ func newScheme() *runtime.Scheme {
 func main() {
 	var metricsAddr string
 	var probeAddr string
-	var meshAddr string
+	var meshAddr, meshNamespace, meshPublicURL string
 	var enableLeaderElection bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "metrics endpoint")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "health probe endpoint")
-	flag.StringVar(&meshAddr, "mesh-bind-address", mesh.DefaultAddr, "mesh gRPC service bind address")
+	flag.StringVar(&meshAddr, "mesh-bind-address", mesh.DefaultAddr, "mesh A2A (JSON-RPC) bind address")
+	flag.StringVar(&meshNamespace, "mesh-namespace", "default", "namespace the mesh delegates to unless a request overrides it")
+	flag.StringVar(&meshPublicURL, "mesh-public-url", "http://localhost"+mesh.DefaultAddr, "URL the mesh advertises in its agent card")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "enable leader election for HA")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -68,9 +70,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	meshSrv := &meshserver.Server{Client: mgr.GetClient()}
-	if err := mgr.Add(meshserver.NewRunnable(meshAddr, meshSrv)); err != nil {
-		ctrl.Log.Error(err, "unable to add mesh grpc server")
+	meshExec := &meshserver.Executor{Client: mgr.GetClient(), Namespace: meshNamespace, PublicURL: meshPublicURL}
+	if err := mgr.Add(meshserver.NewRunnable(meshAddr, meshExec)); err != nil {
+		ctrl.Log.Error(err, "unable to add mesh A2A server")
 		os.Exit(1)
 	}
 

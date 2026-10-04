@@ -16,12 +16,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	meshv1alpha1 "github.com/itaic/agent-mesh/api/v1alpha1"
-	a2aclient "github.com/itaic/agent-mesh/pkg/a2a/client"
+	"github.com/itaic/agent-mesh/internal/agentclient"
 )
 
 // AgentReconciler reconciles an Agent object: it owns a Deployment+Service
-// pair that runs the agent's A2A server, then dials that server to confirm
-// the AgentCard it presents at runtime matches what's declared in spec.
+// pair that runs the agent's A2A server, then fetches the agent card that
+// server publishes at /.well-known/agent-card.json to confirm it's live.
 type AgentReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -31,6 +31,7 @@ type AgentReconciler struct {
 // +kubebuilder:rbac:groups=mesh.itai.dev,resources=agents/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 
 func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -56,7 +57,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, fmt.Errorf("reconciling service: %w", err)
 	}
 
-	endpoint := fmt.Sprintf("%s.%s.svc.cluster.local:%d", svc.Name, svc.Namespace, agent.Spec.Port)
+	endpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", svc.Name, svc.Namespace, agent.Spec.Port)
 
 	var currentDep appsv1.Deployment
 	if err := r.Get(ctx, types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace}, &currentDep); err != nil {
@@ -81,27 +82,14 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Deployment has ready pods — verify the live AgentCard.
-	a2aConn, err := a2aclient.Dial(ctx, endpoint)
+	// Deployment has ready pods — verify the live agent card.
+	card, err := agentclient.ResolveCard(ctx, endpoint)
 	if err != nil {
-		logger.Error(err, "dialing agent for card verification", "endpoint", endpoint)
+		logger.Error(err, "fetching agent card", "endpoint", endpoint)
 		agent.Status.Ready = false
 		meta_SetCondition(&agent.Status.Conditions, metav1.Condition{
 			Type: "CardVerified", Status: metav1.ConditionFalse,
-			Reason: "DialFailed", Message: err.Error(),
-		})
-		_ = r.Status().Update(ctx, &agent)
-		return ctrl.Result{RequeueAfter: requeueShort}, nil
-	}
-	defer a2aConn.Close()
-
-	card, err := a2aConn.GetAgentCard(ctx)
-	if err != nil {
-		logger.Error(err, "fetching AgentCard", "endpoint", endpoint)
-		agent.Status.Ready = false
-		meta_SetCondition(&agent.Status.Conditions, metav1.Condition{
-			Type: "CardVerified", Status: metav1.ConditionFalse,
-			Reason: "GetAgentCardFailed", Message: err.Error(),
+			Reason: "AgentCardUnavailable", Message: err.Error(),
 		})
 		_ = r.Status().Update(ctx, &agent)
 		return ctrl.Result{RequeueAfter: requeueShort}, nil
@@ -109,7 +97,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	observed := make([]string, 0, len(card.Skills))
 	for _, s := range card.Skills {
-		observed = append(observed, s.Id)
+		observed = append(observed, s.ID)
 	}
 	agent.Status.ObservedCapabilities = observed
 	agent.Status.Ready = true
@@ -142,7 +130,7 @@ func (r *AgentReconciler) desiredDeployment(a *meshv1alpha1.Agent) *appsv1.Deplo
 					Containers: []corev1.Container{{
 						Name:      "a2a-server",
 						Image:     a.Spec.Image,
-						Ports:     []corev1.ContainerPort{{ContainerPort: a.Spec.Port, Name: "grpc"}},
+						Ports:     []corev1.ContainerPort{{ContainerPort: a.Spec.Port, Name: "a2a"}},
 						Env:       a.Spec.Env,
 						Resources: a.Spec.Resources,
 					}},
@@ -159,7 +147,7 @@ func (r *AgentReconciler) desiredService(a *meshv1alpha1.Agent) *corev1.Service 
 		Spec: corev1.ServiceSpec{
 			Selector: labels,
 			Ports: []corev1.ServicePort{{
-				Name: "grpc", Port: a.Spec.Port, TargetPort: intstrFromInt32(a.Spec.Port),
+				Name: "a2a", Port: a.Spec.Port, TargetPort: intstrFromInt32(a.Spec.Port),
 			}},
 		},
 	}

@@ -189,8 +189,11 @@ spec:
                 type: string
               port:
                 default: 50051
-                description: Port is the gRPC port the agent's A2AService listens
-                  on.
+                description: |-
+                  Port is where the agent serves A2A: its agent card at
+                  /.well-known/agent-card.json plus whichever bindings it advertises
+                  (JSON-RPC, HTTP+JSON, or gRPC). The agent must listen on 0.0.0.0, not
+                  loopback, or the Service can't reach it.
                 format: int32
                 type: integer
               replicas:
@@ -351,8 +354,8 @@ spec:
                 type: array
               endpoint:
                 description: |-
-                  Endpoint is the in-cluster address (ClusterIP Service DNS name and
-                  port) other agents/controllers use to reach this agent's A2AService.
+                  Endpoint is the in-cluster base URL (http://<service>.<ns>.svc.cluster.local:<port>)
+                  the mesh resolves the agent card from and sends A2A traffic to.
                 type: string
               observedCapabilities:
                 description: |-

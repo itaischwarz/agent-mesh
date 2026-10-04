@@ -25,7 +25,10 @@ type AgentSpec struct {
 	// +kubebuilder:validation:Required
 	Image string `json:"image"`
 
-	// Port is the gRPC port the agent's A2AService listens on.
+	// Port is where the agent serves A2A: its agent card at
+	// /.well-known/agent-card.json plus whichever bindings it advertises
+	// (JSON-RPC, HTTP+JSON, or gRPC). The agent must listen on 0.0.0.0, not
+	// loopback, or the Service can't reach it.
 	// +kubebuilder:default=50051
 	Port int32 `json:"port,omitempty"`
 
@@ -64,8 +67,8 @@ type AgentStatus struct {
 	// out of sync with the CRD (e.g. a rollout in progress).
 	ObservedCapabilities []string `json:"observedCapabilities,omitempty"`
 
-	// Endpoint is the in-cluster address (ClusterIP Service DNS name and
-	// port) other agents/controllers use to reach this agent's A2AService.
+	// Endpoint is the in-cluster base URL (http://<service>.<ns>.svc.cluster.local:<port>)
+	// the mesh resolves the agent card from and sends A2A traffic to.
 	Endpoint string `json:"endpoint,omitempty"`
 
 	// ObservedGeneration lets clients detect whether status reflects the
