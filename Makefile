@@ -40,8 +40,9 @@ undeploy:
 # loaded $(MANAGER_IMG) on the fly, so it never tries to pull from a registry.
 deploy-local: kind-load
 	kubectl apply -f config/crd/bases/
-	kubectl apply -f config/rbac/role.yaml
+	kubectl apply -f config/rbac/role.yaml -f config/rbac/role_binding.yaml
 	sed 's#ghcr.io/itaic/agent-mesh:latest#$(MANAGER_IMG)#' config/manager/manager.yaml | kubectl apply -f -
+	kubectl -n agent-mesh-system rollout restart deploy/agent-mesh-controller-manager
 
 fmt:
 	go fmt ./...
@@ -49,12 +50,15 @@ fmt:
 vet:
 	go vet ./...
 
+test:
+	go test ./...
+
 # Builds the manager image from the root Dockerfile.
 docker-build-manager:
 	docker build -t $(MANAGER_IMG) -f Dockerfile .
 
-# Builds the reference echoagent image (cmd/echoagent) — a minimal
-# A2AServiceServer for local testing, not for production use.
+# Builds the reference echoagent image (cmd/echoagent) — a minimal A2A v1.0
+# agent for local testing, not for production use.
 docker-build-echoagent:
 	docker build -t $(ECHOAGENT_IMG) -f cmd/echoagent/Dockerfile .
 
@@ -66,8 +70,8 @@ docker-build: docker-build-manager docker-build-echoagent
 kind-load: docker-build
 	kind load docker-image $(MANAGER_IMG) $(ECHOAGENT_IMG) --name $(KIND_CLUSTER)
 
-# Smoke-tests the general A2A protocol round-trip against the containerized
-# echoagent image (docker build + docker run, no kind/cluster required).
-# Requires docker and grpcurl on PATH (brew install grpcurl).
+# Smoke-tests the A2A v1.0 round-trip against the containerized echoagent
+# image (docker build + docker run, no kind/cluster required) using
+# cmd/a2a-send as the client. Requires docker.
 test-a2a:
 	./hack/test-a2a.sh

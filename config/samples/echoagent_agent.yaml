@@ -1,0 +1,14 @@
+apiVersion: mesh.itai.dev/v1alpha1
+kind: Agent
+metadata:
+  name: echo-agent
+spec:
+  name: echo-agent
+  description: Reference A2A agent for local testing (cmd/echoagent)
+  image: echoagent:dev
+  port: 50051
+  replicas: 1
+  skills:
+    - id: echo
+      name: Echo
+      description: Repeats back whatever text it's given

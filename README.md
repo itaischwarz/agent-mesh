@@ -1,104 +1,91 @@
 # agent-mesh
 
-A Kubernetes-native implementation of Google's [A2A protocol](https://a2a-protocol.org)
-(now under the Linux Foundation's Agentic AI Foundation). Agents are
-first-class CRDs; dispatching work to them is a Task CRD. The controller
-handles deployment, capability verification, and task lifecycle so an
-operator interacts with the mesh through `kubectl` instead of hand-rolled
-gRPC calls.
+A Kubernetes-native control plane for [A2A v1.0](https://a2a-protocol.org)
+agents (the Agent2Agent protocol, governed by the Linux Foundation's Agentic
+AI Foundation). Agents are first-class CRDs; delegating work to one is a Task
+CRD. agent-mesh speaks standard A2A on both sides, built on the official
+[a2a-go](https://github.com/a2aproject/a2a-go) SDK, so any A2A agent can be
+deployed into it and any A2A client can delegate through it.
 
 ## Architecture
 
 ```
-Agent (CRD)  ──owns──>  Deployment + Service  (runs your A2A server image)
-     │                          │
-     │ AgentReconciler dials the Service, calls GetAgentCard,
-     │ writes status.ready / status.observedCapabilities
-     ▼
-status.endpoint  (ClusterIP DNS:port)
-     ▲
-     │ resolved by
-     │
-Task (CRD)  ──> TaskReconciler ──gRPC(A2AService)──> Agent's Service
-     spec.agentRef                 SendMessage / GetTask / CancelTask
-     spec.message                  status.state, status.artifacts mirrored back
+caller (any A2A client)
+   │  A2A SendMessage, metadata mesh.itai.dev/target-agent=<agent>
+   ▼
+agent-mesh (itself an A2A agent)  ──creates──>  Task (CRD)
+   ▲  relays Task progress as A2A events            │
+   │                                                ▼
+   │                                       TaskReconciler
+   │                                                │  A2A SendMessage / SubscribeToTask / CancelTask
+   │                                                ▼  (JSON-RPC, HTTP+JSON, or gRPC — whatever the card advertises)
+Agent (CRD) ──owns──> Deployment + Service  ──>  your A2A agent image
+   AgentReconciler fetches /.well-known/agent-card.json,
+   writes status.ready / status.observedCapabilities
 ```
 
-- **`api/v1alpha1`** — `Agent` and `Task` CRD types. `Agent.spec` describes a
-  deployable A2A server plus the `AgentCard` it should present (skills,
-  description). `Task.spec` describes one unit of work (target agent,
-  message) and `Task.status` tracks it through the A2A `TaskState`
-  lifecycle (`submitted → working → {input-required} → completed/failed/canceled/rejected`).
-- **`pkg/a2a/proto/a2a.proto`** — the gRPC contract, trimmed from the
-  official `a2a.v1` package to the RPCs this mesh drives: `GetAgentCard`,
-  `SendMessage`, `GetTask`, `CancelTask`, `SubscribeToTask` (streaming).
-- **`pkg/a2a/client`** — thin Go wrapper around the generated stubs.
-- **`internal/controller`** — `AgentReconciler` (deploy + verify) and
-  `TaskReconciler` (dispatch + poll, with a finalizer that best-effort
-  cancels the remote task on delete).
+- **`api/v1alpha1`** — `Agent` and `Task` CRD types. `Task.status` tracks the
+  A2A task lifecycle (`submitted → working → {input-required} →
+  completed/failed/canceled/rejected`) plus streamed artifacts.
+- **`internal/controller`** — `AgentReconciler` (deploy + verify the live agent
+  card) and `TaskReconciler` (dispatch, stream, and a finalizer that cancels
+  the remote task on delete).
+- **`internal/meshserver`** — the mesh's own A2A endpoint. Its agent card lists
+  every ready Agent as a skill, so it doubles as the mesh's directory.
+- **`internal/agentclient`** — resolves an agent's card from its Service and
+  builds an a2a-go client, re-pointing advertised URLs at the Service.
+- **`internal/a2aconv`** — conversions between CRD types and a2a-go types.
+- **`pkg/mesh`** — the public contract for calling the mesh (metadata keys).
+- **`cmd/echoagent`** — a minimal A2A agent for testing.
+- **`cmd/a2a-send`** — sends one message to any A2A agent (or the mesh) and
+  prints the streamed events.
 
-## What's generated vs. hand-written
+## Writing an agent for the mesh
 
-This sandbox has no network access, so I couldn't run `protoc`,
-`controller-gen`, or `go mod tidy`. Concretely, that means:
+Any A2A v1.0 agent works, in any language. It must:
 
-- **`pkg/a2a/pb/`** doesn't exist yet — it's the output of `make proto`
-  against `pkg/a2a/proto/a2a.proto`. `client.go` and `helpers.go` import it
-  as `a2apb` and won't compile until you generate it.
-- **`api/v1alpha1/zz_generated.deepcopy.go`** is hand-written to match what
-  `controller-gen object:generate` would produce (it's what makes `Agent`/
-  `Task` satisfy `runtime.Object`). Regenerate for real with `make generate`
-  once `controller-gen` is on your PATH — it should come out equivalent.
-- **`config/crd/bases/*.yaml`** and **`config/rbac/role.yaml`** are
-  hand-written to match the `+kubebuilder:` markers in the Go source.
-  `make manifests` regenerates them from the markers directly, which is the
-  source of truth going forward.
-- **`go.sum`** doesn't exist — `go mod tidy` needs to fetch the dependency
-  graph, which needs network.
+1. Serve its agent card at `/.well-known/agent-card.json`.
+2. Listen on `0.0.0.0:<Agent.spec.port>` — not loopback, or the Service can't
+   reach it. (The URL it advertises in its card doesn't matter; the mesh
+   re-points it at the Service.)
 
-## Getting it running
+## Running it
+
+Local checks, no cluster needed:
 
 ```sh
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
-
-make proto        # generates pkg/a2a/pb
-make generate      # regenerates zz_generated.deepcopy.go (optional, already hand-matched)
-make manifests     # regenerates config/crd + rbac from markers (optional, already hand-matched)
-go mod tidy
-make build
-
-kubectl apply -f config/crd/bases/
-make deploy         # or: go run main.go  against your kubeconfig for local dev
-
-kubectl apply -f config/samples/mesh_v1alpha1_agent.yaml
-kubectl apply -f config/samples/mesh_v1alpha1_task.yaml
-kubectl get tasks -w
+make test          # unit tests
+make test-a2a      # builds the echoagent image, runs it, round-trips a task
 ```
 
-You'll need a container image that actually implements the `A2AService`
-server side (`GetAgentCard`/`SendMessage`/`GetTask`/`CancelTask`/
-`SubscribeToTask`) for `config/samples/mesh_v1alpha1_agent.yaml` to go
-`Ready`. If you don't have one handy, the A2A Python or JS SDKs (referenced
-from a2a-protocol.org) can stand one up quickly for testing — point
-`spec.image` at that.
+On a kind cluster named `agent-mesh`:
 
-## Next steps / known gaps
+```sh
+kind create cluster --name agent-mesh
+make deploy-local                                   # build + load images, apply CRDs/RBAC/manager
+kubectl apply -f config/samples/echoagent_agent.yaml
+kubectl get agents -w                               # wait for READY=true
 
-- **Streaming**: `TaskReconciler` currently polls `GetTask` every
-  `requeuePolling` (3s). `SubscribeToTask` is defined in the proto and
-  wrapped in the client, just not wired into the reconcile loop yet — that's
-  the natural next cut (a long-lived goroutine per active Task feeding
-  results back through the work queue, rather than poll-driven
-  `Requeue`s).
-- **mTLS**: `client.Dial` uses insecure transport credentials, fine for
-  same-cluster pods during development. Before this leaves a dev cluster,
-  wire up mTLS per the `AgentCard`'s declared auth scheme — the signed
-  Agent Card fields (`signature`) are in the proto but not yet verified.
-- **Multi-agent routing**: `Task.spec.agentRef` is a direct reference.
-  Discovery-by-skill (asking "which Agent in this namespace can do X"
-  instead of naming one) would turn this from a dispatch layer into an
-  actual mesh — a good candidate for a `TaskTemplate` or `Route` CRD later.
-- **Webhooks**: no validating/mutating webhooks yet (e.g. rejecting a Task
-  whose `skillID` doesn't match any skill the target Agent declares).
+kubectl -n agent-mesh-system port-forward deploy/agent-mesh-controller-manager 50052:50052 &
+go run ./cmd/a2a-send -url http://localhost:50052 -target echo-agent -text "hello mesh"
+kubectl get tasks                                   # the delegation, recorded as a Task
+```
+
+`make generate` and `make manifests` regenerate deepcopy code, CRDs, and RBAC
+from the `+kubebuilder` markers (requires `controller-gen`).
+
+## Known gaps
+
+- **Mesh task state is in memory.** The mesh's A2A task store is the SDK's
+  in-memory default; if the manager restarts, callers lose their mesh task
+  ids (the Task resources survive). A Task-backed task store would fix this.
+- **No multi-turn through the mesh.** Follow-up messages to an existing mesh
+  task (e.g. answering `input-required`) are rejected.
+- **No in-cluster Service for the mesh port.** Reach it via port-forward for
+  now; set `--mesh-public-url` once it has a stable address.
+- **Polling relay.** The mesh re-reads each Task resource every second to
+  relay progress; a watch would remove the latency.
+- **No TLS or auth.** Mesh-to-agent traffic is plaintext, and agent card
+  signatures aren't verified yet.
+- **Routing is by name.** Callers name the target agent; choosing an agent by
+  skill is future work.

@@ -1,0 +1,4 @@
+.git
+bin/
+go-agents/
+**/.DS_Store
