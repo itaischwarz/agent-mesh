@@ -5,14 +5,14 @@ domain: mesh.itai.dev
 layout:
 - go.kubebuilder.io/v4
 projectName: agent-mesh
-repo: github.com/itaic/agent-mesh
+repo: github.com/itaischwarz/agent-mesh
 resources:
 - api:
     crdVersion: v1
   domain: mesh.itai.dev
   group: mesh
   kind: Agent
-  path: github.com/itaic/agent-mesh/api/v1alpha1
+  path: github.com/itaischwarz/agent-mesh/api/v1alpha1
   version: v1alpha1
   controller: true
 - api:
@@ -20,7 +20,7 @@ resources:
   domain: mesh.itai.dev
   group: mesh
   kind: Task
-  path: github.com/itaic/agent-mesh/api/v1alpha1
+  path: github.com/itaischwarz/agent-mesh/api/v1alpha1
   version: v1alpha1
   controller: true
 version: "3"

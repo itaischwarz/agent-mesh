@@ -12,10 +12,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	meshv1alpha1 "github.com/itaic/agent-mesh/api/v1alpha1"
-	"github.com/itaic/agent-mesh/internal/controller"
-	"github.com/itaic/agent-mesh/internal/meshserver"
-	"github.com/itaic/agent-mesh/pkg/mesh"
+	meshv1alpha1 "github.com/itaischwarz/agent-mesh/api/v1alpha1"
+	"github.com/itaischwarz/agent-mesh/internal/controller"
+	"github.com/itaischwarz/agent-mesh/internal/meshserver"
+	"github.com/itaischwarz/agent-mesh/pkg/mesh"
 )
 
 var scheme = newScheme()

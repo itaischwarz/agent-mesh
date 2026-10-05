@@ -110,8 +110,8 @@ type TaskStatus struct {
 	// LastTransitionTime is when State last changed, for backoff/timeout logic.
 	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
 
-	ObservedGeneration int64               `json:"observedGeneration,omitempty"`
-	Conditions         []metav1.Condition  `json:"conditions,omitempty"`
+	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
+	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true

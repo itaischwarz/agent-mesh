@@ -21,9 +21,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	meshv1alpha1 "github.com/itaic/agent-mesh/api/v1alpha1"
-	"github.com/itaic/agent-mesh/internal/a2aconv"
-	"github.com/itaic/agent-mesh/pkg/mesh"
+	meshv1alpha1 "github.com/itaischwarz/agent-mesh/api/v1alpha1"
+	"github.com/itaischwarz/agent-mesh/internal/a2aconv"
+	"github.com/itaischwarz/agent-mesh/pkg/mesh"
 )
 
 // labelA2ATaskID ties a Task resource to the A2A task id the mesh gave its

@@ -1,4 +1,4 @@
-module github.com/itaic/agent-mesh
+module github.com/itaischwarz/agent-mesh
 
 go 1.25.0
 

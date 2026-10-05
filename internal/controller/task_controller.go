@@ -15,10 +15,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	meshv1alpha1 "github.com/itaic/agent-mesh/api/v1alpha1"
-	"github.com/itaic/agent-mesh/internal/a2aconv"
-	"github.com/itaic/agent-mesh/internal/agentclient"
-	"github.com/itaic/agent-mesh/pkg/mesh"
+	meshv1alpha1 "github.com/itaischwarz/agent-mesh/api/v1alpha1"
+	"github.com/itaischwarz/agent-mesh/internal/a2aconv"
+	"github.com/itaischwarz/agent-mesh/internal/agentclient"
+	"github.com/itaischwarz/agent-mesh/pkg/mesh"
 )
 
 const taskFinalizer = "mesh.itai.dev/task-cleanup"

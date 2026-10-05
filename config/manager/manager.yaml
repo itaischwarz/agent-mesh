@@ -27,7 +27,7 @@ spec:
       serviceAccountName: agent-mesh-controller-manager
       containers:
       - name: manager
-        image: ghcr.io/itaic/agent-mesh:latest
+        image: ghcr.io/itaischwarz/agent-mesh:latest
         args:
         - --leader-elect
         - --health-probe-bind-address=:8081

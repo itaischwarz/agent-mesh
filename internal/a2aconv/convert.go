@@ -11,7 +11,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	meshv1alpha1 "github.com/itaic/agent-mesh/api/v1alpha1"
+	meshv1alpha1 "github.com/itaischwarz/agent-mesh/api/v1alpha1"
 )
 
 // ToA2AMessage converts the CRD's Message into an A2A message with the given

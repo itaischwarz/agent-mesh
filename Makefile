@@ -41,7 +41,7 @@ undeploy:
 deploy-local: kind-load
 	kubectl apply -f config/crd/bases/
 	kubectl apply -f config/rbac/role.yaml -f config/rbac/role_binding.yaml
-	sed 's#ghcr.io/itaic/agent-mesh:latest#$(MANAGER_IMG)#' config/manager/manager.yaml | kubectl apply -f -
+	sed 's#ghcr.io/itaischwarz/agent-mesh:latest#$(MANAGER_IMG)#' config/manager/manager.yaml | kubectl apply -f -
 	kubectl -n agent-mesh-system rollout restart deploy/agent-mesh-controller-manager
 
 fmt:
