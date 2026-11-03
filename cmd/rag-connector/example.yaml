@@ -1,0 +1,31 @@
+# Example rag-connector config. Paths are relative to the working directory.
+#
+#   go run ./cmd/rag-connector -config cmd/rag-connector/example.yaml
+#
+# Synced documents land under sinkDir; sync state (cursors) under stateDir.
+stateDir: .rag/state
+sinkDir: .rag/raw
+
+sources:
+  # A local folder: no credentials needed.
+  - id: repo-docs
+    type: fs
+    fs:
+      root: ./docs
+
+  # Google Drive: share the folder with the service account's email first.
+  # - id: team-drive
+  #   type: drive
+  #   drive:
+  #     folderId: "1AbCdEfGhIjKlMnOp"            # from the folder's URL
+  #     credentialsFile: ./secrets/drive-sa.json  # service account key
+
+  # Confluence Cloud: create a token at id.atlassian.com > Security > API tokens,
+  # then: export CONFLUENCE_API_TOKEN=...
+  # - id: eng-wiki
+  #   type: confluence
+  #   confluence:
+  #     baseURL: https://your-site.atlassian.net
+  #     space: ENG
+  #     email: you@example.com
+  #     tokenEnv: CONFLUENCE_API_TOKEN

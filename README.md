@@ -74,6 +74,20 @@ kubectl get tasks                                   # the delegation, recorded a
 `make generate` and `make manifests` regenerate deepcopy code, CRDs, and RBAC
 from the `+kubebuilder` markers (requires `controller-gen`).
 
+## Knowledge connectors
+
+The first layer of the RAG platform planned in [docs/rag-plan.md](docs/rag-plan.md):
+`internal/rag/connector` syncs documents from local folders, Google Drive, and
+Confluence Cloud into a raw document store, incrementally and with deletions.
+
+```sh
+make rag-sync          # syncs the sources in cmd/rag-connector/example.yaml into .rag/
+make rag-sync FULL=1   # full sync: also detects deletions
+```
+
+To add Drive or Confluence, copy `cmd/rag-connector/example.yaml` and fill in
+one of the commented-out sources, then pass `RAG_CONFIG=your.yaml`.
+
 ## Known gaps
 
 - **Mesh task state is in memory.** The mesh's A2A task store is the SDK's

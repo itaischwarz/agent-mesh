@@ -1,5 +1,5 @@
 .PHONY: generate manifests build run deploy deploy-local undeploy fmt vet test \
-	docker-build-manager docker-build-echoagent docker-build kind-load test-a2a
+	docker-build-manager docker-build-echoagent docker-build kind-load test-a2a rag-sync
 
 IMG_TAG ?= dev
 MANAGER_IMG ?= agent-mesh:$(IMG_TAG)
@@ -75,3 +75,9 @@ kind-load: docker-build
 # cmd/a2a-send as the client. Requires docker.
 test-a2a:
 	./hack/test-a2a.sh
+
+# Syncs the sources in RAG_CONFIG (local folders, Google Drive, Confluence)
+# into .rag/. Add FULL=1 to force a full sync, which also detects deletions.
+RAG_CONFIG ?= cmd/rag-connector/example.yaml
+rag-sync:
+	go run ./cmd/rag-connector -config $(RAG_CONFIG) $(if $(FULL),-full)

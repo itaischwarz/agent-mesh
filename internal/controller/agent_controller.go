@@ -165,17 +165,17 @@ func (r *AgentReconciler) applyDeployment(ctx context.Context, dep *appsv1.Deplo
 	return r.Update(ctx, &existing)
 }
 
-func (r *AgentReconciler) applyService(ctx context.Context, svc *corev1.Service) error {
-	var existing corev1.Service
-	err := r.Get(ctx, types.NamespacedName{Name: svc.Name, Namespace: svc.Namespace}, &existing)
-	if apierrors.IsNotFound(err) {
-		return r.Create(ctx, svc)
-	} else if err != nil {
-		return err
-	}
-	existing.Spec.Ports = svc.Spec.Ports
-	existing.Spec.Selector = svc.Spec.Selector
-	return r.Update(ctx, &existing)
+// applyService creates the Service or updates the fields the mesh owns,
+// writing only when they actually differ (ClusterIP etc. stay server-assigned).
+func (r *AgentReconciler) applyService(ctx context.Context, desired *corev1.Service) error {
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: desired.Name, Namespace: desired.Namespace}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
+		svc.Spec.Selector = desired.Spec.Selector
+		svc.Spec.Ports = desired.Spec.Ports
+		svc.OwnerReferences = desired.OwnerReferences
+		return nil
+	})
+	return err
 }
 
 func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
